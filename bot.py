@@ -92,7 +92,9 @@ async def message_handler(message: Message):
             query
         )
 
-    except Exception:
+     except Exception as e:
+        print(f"SEARCH ERROR: {type(e).__name__}: {e}", flush=True)
+
         await status_message.edit_text(
             "🦖 Не удалось получить результаты поиска.\n\n"
             "Попробуй повторить запрос немного позже."
