@@ -2,7 +2,6 @@ import asyncio
 import os
 import re
 
-import requests
 from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
 from aiogram.types import Message
@@ -23,7 +22,7 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "0.3"
+        "version": "0.4"
     }
 
 
@@ -92,8 +91,11 @@ async def message_handler(message: Message):
             query
         )
 
-     except Exception as e:
-        print(f"SEARCH ERROR: {type(e).__name__}: {e}", flush=True)
+    except Exception as e:
+        print(
+            f"SEARCH ERROR: {type(e).__name__}: {e}",
+            flush=True
+        )
 
         await status_message.edit_text(
             "🦖 Не удалось получить результаты поиска.\n\n"
@@ -108,14 +110,13 @@ async def message_handler(message: Message):
         )
         return
 
-    # Оставляем результаты с указанной ценой
     results_with_price = [
-        item for item in results
+        item
+        for item in results
         if item.get("price") is not None
         or item.get("price_text")
     ]
 
-    # Сортируем по числовой цене
     results_with_price.sort(
         key=lambda item: (
             item.get("price")
@@ -127,7 +128,7 @@ async def message_handler(message: Message):
     results_with_price = results_with_price[:10]
 
     lines = [
-        "🦖 НАШЁЛ!",
+        "🦖 ЦЕНОЕД НАШЁЛ!",
         "",
         f"🔎 {query}",
         ""
@@ -136,6 +137,7 @@ async def message_handler(message: Message):
     for index, item in enumerate(results_with_price, start=1):
         title = item.get("title") or "Товар"
         store = item.get("store") or "Магазин"
+
         price = format_price(
             item.get("price")
             if item.get("price") is not None
