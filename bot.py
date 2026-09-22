@@ -27,7 +27,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 BASE_WEBHOOK_URL = "https://cenoed.onrender.com"
-
 WEBHOOK_PATH = "/telegram/webhook"
 
 WEBHOOK_URL = (
@@ -47,23 +46,25 @@ bot: Bot | None = None
 
 
 # ============================================================
-# HEALTH CHECK
+# HEALTH
 # ============================================================
 
 @app.get("/")
 async def health_check():
+
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "1.1",
+        "version": "1.2",
     }
 
 
 # ============================================================
-# BASIC HELPERS
+# HELPERS
 # ============================================================
 
 def clean_query(text: str) -> str:
+
     return re.sub(
         r"\s+",
         " ",
@@ -72,22 +73,10 @@ def clean_query(text: str) -> str:
 
 
 # ============================================================
-# PRICE PARSING
+# PRICE
 # ============================================================
 
 def parse_price(value: Any):
-    """
-    Преобразует цену из разных форматов
-    в число.
-
-    Поддерживает:
-
-    12 990 ₽
-    12,990
-    12990
-    12 990,50 ₽
-    12.990,50
-    """
 
     if value is None:
         return None
@@ -107,81 +96,74 @@ def parse_price(value: Any):
     if not text:
         return None
 
-    cleaned = text.replace(
+    text = text.replace(
         "\xa0",
         " ",
     )
 
-    # Оставляем только цифры,
-    # запятую, точку и пробел.
-    cleaned = re.sub(
+    text = re.sub(
         r"[^\d,.\s]",
         "",
-        cleaned,
+        text,
     )
 
-    cleaned = cleaned.replace(
+    text = text.replace(
         " ",
         "",
     )
 
-    if not cleaned:
+    if not text:
         return None
 
-    # Например:
-    #
-    # 12.990,50
-    # 12,990.50
-    #
-    if "," in cleaned and "." in cleaned:
+    if "," in text and "." in text:
 
-        if cleaned.rfind(",") > cleaned.rfind("."):
+        if text.rfind(",") > text.rfind("."):
 
-            cleaned = cleaned.replace(
+            text = text.replace(
                 ".",
                 "",
             )
 
-            cleaned = cleaned.replace(
+            text = text.replace(
                 ",",
                 ".",
             )
 
         else:
 
-            cleaned = cleaned.replace(
+            text = text.replace(
                 ",",
                 "",
             )
 
-    elif "," in cleaned:
+    elif "," in text:
 
-        parts = cleaned.split(",")
+        parts = text.split(",")
 
         if (
             len(parts) == 2
             and len(parts[1]) <= 2
         ):
 
-            cleaned = cleaned.replace(
+            text = text.replace(
                 ",",
                 ".",
             )
 
         else:
 
-            cleaned = cleaned.replace(
+            text = text.replace(
                 ",",
                 "",
             )
 
-    elif "." in cleaned:
+    elif "." in text:
 
-        parts = cleaned.split(".")
+        parts = text.split(".")
 
         if len(parts) > 2:
 
-            cleaned = cleaned.replace(
+            text = text.replace(
                 ".",
                 "",
             )
@@ -191,14 +173,14 @@ def parse_price(value: Any):
             and len(parts[1]) == 3
         ):
 
-            cleaned = cleaned.replace(
+            text = text.replace(
                 ".",
                 "",
             )
 
     try:
 
-        result = float(cleaned)
+        result = float(text)
 
         if result <= 0:
             return None
@@ -211,7 +193,10 @@ def parse_price(value: Any):
 
 
 def format_price(price):
-    numeric = parse_price(price)
+
+    numeric = parse_price(
+        price
+    )
 
     if numeric is None:
         return "Цена не указана"
@@ -231,7 +216,7 @@ def format_price(price):
 
 
 # ============================================================
-# /START
+# START
 # ============================================================
 
 @dp.message(CommandStart())
@@ -270,10 +255,6 @@ async def message_handler(
     message: Message,
 ):
 
-    # --------------------------------------------------------
-    # Проверяем текст
-    # --------------------------------------------------------
-
     if not message.text:
 
         await message.answer(
@@ -284,7 +265,7 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # Оригинальный запрос пользователя
+    # USER QUERY
     # --------------------------------------------------------
 
     user_query = clean_query(
@@ -302,19 +283,13 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # Строим оптимизированный поисковый запрос
+    # SEARCH QUERY
     # --------------------------------------------------------
 
     search_query = build_search_query(
         user_query
     )
 
-
-    # --------------------------------------------------------
-    # ДИАГНОСТИКА
-    #
-    # Эти строки будут видны в Render Logs.
-    # --------------------------------------------------------
 
     print(
         f"USER QUERY: {user_query}",
@@ -331,10 +306,7 @@ async def message_handler(
 
         await message.answer(
 
-            "🦖 Не удалось понять запрос.\n\n"
-
-            "Попробуй написать название "
-            "товара подробнее."
+            "🦖 Не удалось понять запрос."
 
         )
 
@@ -342,7 +314,7 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # Сообщение о поиске
+    # STATUS
     # --------------------------------------------------------
 
     status_message = await message.answer(
@@ -384,17 +356,46 @@ async def message_handler(
             "🦖 Не удалось получить "
             "результаты поиска.\n\n"
 
-            "Попробуй повторить запрос "
-            "немного позже."
+            "Попробуй повторить запрос позже."
 
         )
 
         return
 
 
-    # --------------------------------------------------------
-    # Нет результатов
-    # --------------------------------------------------------
+    # ========================================================
+    # RAW RESULTS DEBUG
+    # ========================================================
+
+    print(
+        f"RAW RESULTS: {len(results)}",
+        flush=True,
+    )
+
+
+    for index, item in enumerate(
+        results[:15],
+        start=1,
+    ):
+
+        print(
+            f"RESULT {index}: "
+            f"{item.get('title')}",
+            flush=True,
+        )
+
+        print(
+            f"RESULT {index} STORE: "
+            f"{item.get('store')}",
+            flush=True,
+        )
+
+        print(
+            f"RESULT {index} PRICE: "
+            f"{item.get('price')}",
+            flush=True,
+        )
+
 
     if not results:
 
@@ -436,6 +437,7 @@ async def message_handler(
 
 
         if numeric_price is None:
+
             continue
 
 
@@ -449,14 +451,30 @@ async def message_handler(
         )
 
 
+    print(
+        f"RESULTS WITH PRICE: "
+        f"{len(results_with_price)}",
+        flush=True,
+    )
+
+
     # ========================================================
-    # PRODUCT MATCHING
+    # PRODUCT MATCHING DEBUG
     # ========================================================
 
     filtered_results = []
 
 
-    for item in results_with_price:
+    for index, item in enumerate(
+        results_with_price,
+        start=1,
+    ):
+
+        title = (
+            item.get("title")
+            or ""
+        )
+
 
         try:
 
@@ -472,8 +490,7 @@ async def message_handler(
 
             print(
 
-                "MATCHING ERROR: "
-
+                f"MATCH ERROR {index}: "
                 f"{type(e).__name__}: {e}",
 
                 flush=True,
@@ -483,6 +500,17 @@ async def message_handler(
             relevant = False
 
 
+        print(
+
+            f"MATCH {index}: "
+            f"{relevant} | "
+            f"{title}",
+
+            flush=True,
+
+        )
+
+
         if relevant:
 
             filtered_results.append(
@@ -490,9 +518,16 @@ async def message_handler(
             )
 
 
-    # --------------------------------------------------------
-    # Нет точных совпадений
-    # --------------------------------------------------------
+    print(
+        f"FILTERED RESULTS: "
+        f"{len(filtered_results)}",
+        flush=True,
+    )
+
+
+    # ========================================================
+    # NO EXACT MATCH
+    # ========================================================
 
     if not filtered_results:
 
@@ -513,7 +548,7 @@ async def message_handler(
 
 
     # ========================================================
-    # SORT BY PRICE
+    # SORT
     # ========================================================
 
     filtered_results.sort(
@@ -523,8 +558,6 @@ async def message_handler(
 
     )
 
-
-    # Максимум 10 результатов.
 
     filtered_results = (
         filtered_results[:10]
@@ -561,7 +594,6 @@ async def message_handler(
         title = html.escape(
 
             item.get("title")
-
             or "Товар"
 
         )
@@ -570,7 +602,6 @@ async def message_handler(
         store = html.escape(
 
             item.get("store")
-
             or "Магазин",
 
             quote=True,
@@ -591,15 +622,6 @@ async def message_handler(
 
         )
 
-
-        safe_price = html.escape(
-            price
-        )
-
-
-        # ----------------------------------------------------
-        # Магазин
-        # ----------------------------------------------------
 
         if raw_link:
 
@@ -631,10 +653,6 @@ async def message_handler(
             )
 
 
-        # ----------------------------------------------------
-        # Номер
-        # ----------------------------------------------------
-
         if index == 1:
 
             prefix = "🥇"
@@ -652,17 +670,13 @@ async def message_handler(
             prefix = f"{index}."
 
 
-        # ----------------------------------------------------
-        # Товар
-        # ----------------------------------------------------
-
         lines.append(
 
             f"{prefix} 🛒 "
 
             f"{store_line} — "
 
-            f"💰 <b>{safe_price}</b>\n"
+            f"💰 <b>{html.escape(price)}</b>\n"
 
             f"   {title}"
 
@@ -672,16 +686,10 @@ async def message_handler(
         lines.append("")
 
 
-    # ========================================================
-    # LOWEST PRICE
-    # ========================================================
-
     lowest_price = (
 
         filtered_results[0]
-
         ["numeric_price"]
-
     )
 
 
@@ -708,10 +716,6 @@ async def message_handler(
     )
 
 
-    # ========================================================
-    # SEND RESULT
-    # ========================================================
-
     await status_message.edit_text(
 
         "\n".join(lines),
@@ -722,7 +726,7 @@ async def message_handler(
 
 
 # ============================================================
-# TELEGRAM WEBHOOK
+# WEBHOOK
 # ============================================================
 
 @app.post(WEBHOOK_PATH)
@@ -736,10 +740,6 @@ async def telegram_webhook(
         ),
 
 ):
-
-    # --------------------------------------------------------
-    # Проверяем секрет
-    # --------------------------------------------------------
 
     if not WEBHOOK_SECRET:
 
@@ -769,10 +769,6 @@ async def telegram_webhook(
         )
 
 
-    # --------------------------------------------------------
-    # Telegram Update
-    # --------------------------------------------------------
-
     data = await request.json()
 
 
@@ -786,10 +782,6 @@ async def telegram_webhook(
 
     )
 
-
-    # --------------------------------------------------------
-    # Передаём update в aiogram
-    # --------------------------------------------------------
 
     await dp.feed_update(
 
@@ -890,7 +882,7 @@ async def shutdown_event():
 
 
 # ============================================================
-# WEB SERVER
+# SERVER
 # ============================================================
 
 async def run_web():
@@ -898,11 +890,8 @@ async def run_web():
     port = int(
 
         os.getenv(
-
             "PORT",
-
             "10000",
-
         )
 
     )
