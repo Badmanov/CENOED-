@@ -45,7 +45,7 @@ def normalize_text(text: str) -> str:
     for old, new in replacements.items():
         text = text.replace(old, new)
 
-    # Разделяем 256GB -> 256 GB
+    # 256GB -> 256 GB
     text = re.sub(
         r"(\d)([a-zа-я])",
         r"\1 \2",
@@ -58,8 +58,9 @@ def normalize_text(text: str) -> str:
         text,
     )
 
+    # Оставляем полезные символы названий и характеристик.
     text = re.sub(
-        r"[^\w\s./+-]",
+        r"[^\w\s./+&-]",
         " ",
         text,
     )
@@ -95,6 +96,7 @@ ACCESSORY_WORDS = {
     "charger",
     "зарядка",
     "зарядное",
+
     "адаптер",
     "adapter",
 
@@ -118,8 +120,7 @@ ACCESSORY_WORDS = {
     "бампер",
 
     "powerbank",
-    "power",
-    "bank",
+    "пауэрбанк",
 
     "переходник",
     "штатив",
@@ -130,14 +131,13 @@ ACCESSORY_WORDS = {
 
 
 def has_accessory_marker(text: str) -> bool:
-    normalized = normalize_text(text)
-    tokens = set(normalized.split())
+    tokens = set(
+        normalize_text(text).split()
+    )
 
-    for word in ACCESSORY_WORDS:
-        if word in tokens:
-            return True
-
-    return False
+    return bool(
+        tokens.intersection(ACCESSORY_WORDS)
+    )
 
 
 # ============================================================
@@ -155,14 +155,17 @@ def extract_storage(text: str):
 
     normalized = normalize_text(text)
 
-    result = []
-
-    pattern = re.compile(
-        r"\b(\d+(?:[.,]\d+)?)\s*(gb|tb)\b"
+    matches = re.findall(
+        r"\b(\d+(?:[.,]\d+)?)\s*(gb|tb)\b",
+        normalized,
     )
 
-    for value, unit in pattern.findall(normalized):
-        number = float(value.replace(",", "."))
+    result = []
+
+    for value, unit in matches:
+        number = float(
+            value.replace(",", ".")
+        )
 
         if unit == "tb":
             number *= 1024
@@ -182,19 +185,24 @@ def extract_volume(text: str):
 
     normalized = normalize_text(text)
 
-    result = []
-
-    pattern = re.compile(
-        r"\b(\d+(?:[.,]\d+)?)\s*(ml|l)\b"
+    matches = re.findall(
+        r"\b(\d+(?:[.,]\d+)?)\s*(ml|l)\b",
+        normalized,
     )
 
-    for value, unit in pattern.findall(normalized):
-        number = float(value.replace(",", "."))
+    result = []
+
+    for value, unit in matches:
+        number = float(
+            value.replace(",", ".")
+        )
 
         if unit == "l":
             number *= 1000
 
-        result.append(round(number, 2))
+        result.append(
+            round(number, 2)
+        )
 
     return result or None
 
@@ -209,19 +217,37 @@ def extract_weight(text: str):
 
     normalized = normalize_text(text)
 
-    result = []
-
-    pattern = re.compile(
-        r"\b(\d+(?:[.,]\d+)?)\s*(kg|g)\b"
+    # Русские варианты.
+    normalized = re.sub(
+        r"\bгр\b",
+        "g",
+        normalized,
     )
 
-    for value, unit in pattern.findall(normalized):
-        number = float(value.replace(",", "."))
+    normalized = re.sub(
+        r"\bг\b",
+        "g",
+        normalized,
+    )
+
+    matches = re.findall(
+        r"\b(\d+(?:[.,]\d+)?)\s*(kg|g)\b",
+        normalized,
+    )
+
+    result = []
+
+    for value, unit in matches:
+        number = float(
+            value.replace(",", ".")
+        )
 
         if unit == "kg":
             number *= 1000
 
-        result.append(round(number, 2))
+        result.append(
+            round(number, 2)
+        )
 
     return result or None
 
@@ -237,24 +263,57 @@ def extract_count(text: str):
     if not matches:
         return None
 
-    return [int(value) for value in matches]
+    return [
+        int(value)
+        for value in matches
+    ]
 
 
 def extract_diagonal(text: str):
+    """
+    Возвращает диагонали экранов в дюймах.
+
+    Поддерживает:
+    6.7 inch
+    6.7 in
+    6.7"
+    """
+
     normalized = normalize_text(text)
 
     matches = re.findall(
-        r"\b(\d+(?:[.,]\d+)?)\s*(?:inch|")\b",
+        r"\b(\d+(?:[.,]\d+)?)\s*(?:inch|in)\b",
         normalized,
     )
 
-    if not matches:
-        return None
+    if matches:
+        return [
+            float(
+                value.replace(",", ".")
+            )
+            for value in matches
+        ]
 
-    return [
-        float(value.replace(",", "."))
-        for value in matches
-    ]
+    # normalize_text удаляет кавычки.
+    # Поэтому отдельно проверяем исходный текст.
+    original = (
+        str(text or "")
+        .lower()
+        .replace(",", ".")
+    )
+
+    quoted = re.findall(
+        r"\b(\d+(?:\.\d+)?)\s*\"",
+        original,
+    )
+
+    if quoted:
+        return [
+            float(value)
+            for value in quoted
+        ]
+
+    return None
 
 
 # ============================================================
@@ -288,7 +347,9 @@ def extract_pampers_size(text: str):
         )
 
         if match:
-            return int(match.group(1))
+            return int(
+                match.group(1)
+            )
 
     if "newborn" in normalized:
         return 0
@@ -310,6 +371,7 @@ STOP_WORDS = {
     "в",
     "из",
     "по",
+
     "шт",
     "pcs",
     "pieces",
@@ -333,6 +395,17 @@ STOP_WORDS = {
     "товар",
     "купить",
     "цена",
+
+    # Единицы измерения не являются частью
+    # идентичности товара.
+    "gb",
+    "tb",
+    "kg",
+    "g",
+    "ml",
+    "l",
+    "inch",
+    "in",
 }
 
 
@@ -354,15 +427,18 @@ def tokenize(text: str):
 BRAND_ALIASES = {
     "apple": {
         "apple",
+        "эппл",
     },
 
     "samsung": {
         "samsung",
+        "самсунг",
     },
 
     "xiaomi": {
         "xiaomi",
         "сяоми",
+        "ксиаоми",
     },
 
     "redmi": {
@@ -376,14 +452,17 @@ BRAND_ALIASES = {
 
     "huawei": {
         "huawei",
+        "хуавей",
     },
 
     "google": {
         "google",
+        "гугл",
     },
 
     "oneplus": {
         "oneplus",
+        "one plus",
     },
 
     "oppo": {
@@ -430,9 +509,7 @@ BRAND_ALIASES = {
     },
 
     "coca-cola": {
-        "coca",
         "coca-cola",
-        "кока",
         "кока-кола",
     },
 
@@ -444,12 +521,27 @@ BRAND_ALIASES = {
 
 def detect_brands(text: str):
     normalized = normalize_text(text)
+    tokens = set(
+        normalized.split()
+    )
 
     found = set()
 
     for canonical, aliases in BRAND_ALIASES.items():
+
         for alias in aliases:
-            if alias in normalized:
+            alias_normalized = normalize_text(
+                alias
+            )
+
+            # Составные названия.
+            if " " in alias_normalized:
+                if alias_normalized in normalized:
+                    found.add(canonical)
+                    break
+
+            # Обычные слова.
+            elif alias_normalized in tokens:
                 found.add(canonical)
                 break
 
@@ -457,13 +549,13 @@ def detect_brands(text: str):
 
 
 # ============================================================
-# VARIANT FAMILIES
+# PRODUCT VARIANTS
 # ============================================================
 
 VARIANT_FAMILIES = [
     {
-        "pro",
         "pro max",
+        "pro",
         "plus",
         "air",
         "mini",
@@ -472,13 +564,8 @@ VARIANT_FAMILIES = [
 
     {
         "ultra",
-        "plus",
         "fe",
         "lite",
-        "mini",
-        "pro",
-        "pro max",
-        "max",
     },
 
     {
@@ -486,7 +573,6 @@ VARIANT_FAMILIES = [
         "light",
         "diet",
         "classic",
-        "original",
     },
 
     {
@@ -496,17 +582,23 @@ VARIANT_FAMILIES = [
 ]
 
 
-def contains_phrase(text: str, phrase: str) -> bool:
-    normalized = normalize_text(text)
-
-    if " " in phrase:
-        return phrase in normalized.split(
-            " "
-        ) if False else phrase in normalized
-
-    return phrase in set(
-        normalized.split()
-    )
+VARIANT_PHRASES = (
+    "pro max",
+    "pro",
+    "plus",
+    "ultra",
+    "air",
+    "mini",
+    "max",
+    "fe",
+    "lite",
+    "zero",
+    "light",
+    "diet",
+    "classic",
+    "fold",
+    "flip",
+)
 
 
 def extract_variants(text: str):
@@ -514,33 +606,87 @@ def extract_variants(text: str):
 
     found = set()
 
-    phrases = {
-        "pro max",
-        "pro",
-        "plus",
-        "air",
-        "mini",
-        "max",
-        "ultra",
-        "fe",
-        "lite",
-        "zero",
-        "light",
-        "diet",
-        "classic",
-        "original",
-        "fold",
-        "flip",
-    }
+    # Сначала длинные варианты.
+    # Это важно для Pro Max.
+    if re.search(
+        r"\bpro\s+max\b",
+        normalized,
+    ):
+        found.add("pro max")
 
-    for phrase in phrases:
-        if contains_phrase(
+    for phrase in VARIANT_PHRASES:
+
+        if phrase == "pro max":
+            continue
+
+        if re.search(
+            rf"(?<!\w){re.escape(phrase)}(?!\w)",
             normalized,
-            phrase,
         ):
             found.add(phrase)
 
+    # Pro Max — отдельная модификация,
+    # а не одновременно Pro и Max.
+    if "pro max" in found:
+        found.discard("pro")
+        found.discard("max")
+
     return found
+
+
+def variants_match(
+    query: str,
+    title: str,
+):
+    query_variants = extract_variants(
+        query
+    )
+
+    title_variants = extract_variants(
+        title
+    )
+
+    # Все явно указанные варианты запроса
+    # должны совпадать.
+    if not query_variants.issubset(
+        title_variants
+    ):
+        return False
+
+    # Проверяем несовместимые варианты
+    # внутри одного семейства.
+    for family in VARIANT_FAMILIES:
+
+        query_family = (
+            query_variants.intersection(
+                family
+            )
+        )
+
+        title_family = (
+            title_variants.intersection(
+                family
+            )
+        )
+
+        if query_family and title_family:
+
+            if query_family != title_family:
+                return False
+
+    # Если пользователь не указал вариант,
+    # не подставляем ему очевидно другую
+    # модификацию товара.
+    if not query_variants:
+
+        for family in VARIANT_FAMILIES:
+
+            if title_variants.intersection(
+                family
+            ):
+                return False
+
+    return True
 
 
 # ============================================================
@@ -567,57 +713,62 @@ def attributes_match(
     query: str,
     title: str,
 ):
-    query_storage = extract_storage(query)
-    title_storage = extract_storage(title)
+    checks = (
+        (
+            extract_storage(query),
+            extract_storage(title),
+        ),
+        (
+            extract_volume(query),
+            extract_volume(title),
+        ),
+        (
+            extract_weight(query),
+            extract_weight(title),
+        ),
+        (
+            extract_count(query),
+            extract_count(title),
+        ),
+    )
 
-    if not values_match(
-        query_storage,
-        title_storage,
-    ):
-        return False
+    for query_values, title_values in checks:
 
-    query_volume = extract_volume(query)
-    title_volume = extract_volume(title)
+        if not values_match(
+            query_values,
+            title_values,
+        ):
+            return False
 
-    if not values_match(
-        query_volume,
-        title_volume,
-    ):
-        return False
+    # Диагональ.
+    query_diagonal = extract_diagonal(
+        query
+    )
 
-    query_weight = extract_weight(query)
-    title_weight = extract_weight(title)
-
-    if not values_match(
-        query_weight,
-        title_weight,
-    ):
-        return False
-
-    query_count = extract_count(query)
-    title_count = extract_count(title)
-
-    if not values_match(
-        query_count,
-        title_count,
-    ):
-        return False
-
-    query_diagonal = extract_diagonal(query)
-    title_diagonal = extract_diagonal(title)
+    title_diagonal = extract_diagonal(
+        title
+    )
 
     if query_diagonal:
+
         if not title_diagonal:
             return False
 
         for value in query_diagonal:
+
             if value not in title_diagonal:
                 return False
 
-    query_pampers = extract_pampers_size(query)
+    # Pampers.
+    query_pampers = extract_pampers_size(
+        query
+    )
 
     if query_pampers is not None:
-        title_pampers = extract_pampers_size(title)
+
+        title_pampers = (
+            extract_pampers_size(title)
+        )
 
         if title_pampers != query_pampers:
             return False
@@ -626,83 +777,41 @@ def attributes_match(
 
 
 # ============================================================
-# VARIANT MATCHING
+# PRODUCT IDENTITY
 # ============================================================
 
-def variants_match(
-    query: str,
-    title: str,
-):
-    query_variants = extract_variants(query)
-    title_variants = extract_variants(title)
-
-    # Все явно указанные варианты запроса
-    # должны присутствовать в результате.
-    for variant in query_variants:
-        if variant not in title_variants:
-            return False
-
-    # Если запрос содержит конкретный вариант,
-    # несовместимый вариант в названии запрещаем.
-    if query_variants:
-        for family in VARIANT_FAMILIES:
-            query_family = query_variants & family
-            title_family = title_variants & family
-
-            if query_family and title_family:
-                if query_family.isdisjoint(
-                    title_family
-                ):
-                    return False
-
-    # Если запрос без варианта,
-    # не принимаем очевидно другой вариант
-    # для известных семейств.
-    if not query_variants:
-        for family in VARIANT_FAMILIES:
-            title_family = title_variants & family
-
-            if len(title_family) > 0:
-                return False
-
-    return True
-
-
-# ============================================================
-# IDENTITY MATCHING
-# ============================================================
-
-def identity_tokens(
-    text: str,
-):
+def identity_tokens(text: str):
     tokens = tokenize(text)
 
-    # Убираем числа характеристик.
     attributes = set()
 
-    for value in extract_storage(text) or []:
-        attributes.add(str(value))
+    extractors = (
+        extract_storage,
+        extract_volume,
+        extract_weight,
+        extract_count,
+        extract_diagonal,
+    )
 
-    for value in extract_volume(text) or []:
-        attributes.add(str(value))
+    for extractor in extractors:
 
-    for value in extract_weight(text) or []:
-        attributes.add(str(value))
+        for value in extractor(text) or []:
 
-    for value in extract_count(text) or []:
-        attributes.add(str(value))
-
-    for value in extract_diagonal(text) or []:
-        attributes.add(str(value))
+            attributes.add(
+                str(value)
+                .rstrip("0")
+                .rstrip(".")
+            )
 
     result = set()
 
     for token in tokens:
+
         if token in attributes:
             continue
 
-        # Чистые числа характеристик не являются
-        # частью названия товара.
+        # Чистые числа характеристик
+        # не являются названием товара.
         if re.fullmatch(
             r"\d+(?:[.,]\d+)?",
             token,
@@ -718,20 +827,22 @@ def identity_match(
     query: str,
     title: str,
 ):
-    query_tokens = identity_tokens(query)
-    title_tokens = identity_tokens(title)
+    query_tokens = identity_tokens(
+        query
+    )
+
+    title_tokens = identity_tokens(
+        title
+    )
 
     if not query_tokens:
         return True
 
-    # Каждый существенный токен запроса должен
-    # встречаться в названии результата.
-    missing = query_tokens - title_tokens
-
-    if missing:
-        return False
-
-    return True
+    # Каждый существенный токен запроса
+    # должен присутствовать в результате.
+    return query_tokens.issubset(
+        title_tokens
+    )
 
 
 # ============================================================
@@ -742,34 +853,42 @@ def is_relevant_result(
     query: str,
     item: dict,
 ) -> bool:
+
     title = item.get("title") or ""
 
-    if not title:
+    if not title.strip():
         return False
 
     # --------------------------------------------------------
-    # 1. Accessories
+    # 1. ACCESSORIES
     # --------------------------------------------------------
 
     if not has_accessory_marker(query):
+
         if has_accessory_marker(title):
             return False
 
     # --------------------------------------------------------
-    # 2. Brand
+    # 2. BRAND
     # --------------------------------------------------------
 
-    query_brands = detect_brands(query)
-    title_brands = detect_brands(title)
+    query_brands = detect_brands(
+        query
+    )
+
+    title_brands = detect_brands(
+        title
+    )
 
     if query_brands:
+
         if not query_brands.intersection(
             title_brands
         ):
             return False
 
     # --------------------------------------------------------
-    # 3. Attributes
+    # 3. ATTRIBUTES
     # --------------------------------------------------------
 
     if not attributes_match(
@@ -779,7 +898,7 @@ def is_relevant_result(
         return False
 
     # --------------------------------------------------------
-    # 4. Variants
+    # 4. VARIANT
     # --------------------------------------------------------
 
     if not variants_match(
@@ -789,7 +908,7 @@ def is_relevant_result(
         return False
 
     # --------------------------------------------------------
-    # 5. Product identity
+    # 5. PRODUCT IDENTITY
     # --------------------------------------------------------
 
     if not identity_match(
