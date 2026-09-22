@@ -7,26 +7,17 @@ import re
 
 def normalize_text(text: str) -> str:
     """
-    Приводит текст к единому виду.
-
-    Примеры:
-
-    256GB -> 256 GB
-    iPhone17 -> iPhone 17
-    ё -> е
+    Приводит текст к нормальному виду.
     """
 
-    text = str(text or "").lower().replace(
+    text = str(text or "").lower()
+
+    text = text.replace(
         "ё",
         "е",
     )
 
     replacements = {
-        "×": "x",
-        "–": "-",
-        "—": "-",
-        "−": "-",
-
         "гб": "gb",
         "гигабайт": "gb",
         "гигабайта": "gb",
@@ -78,7 +69,7 @@ def normalize_text(text: str) -> str:
 
     # Убираем лишнюю пунктуацию.
     text = re.sub(
-        r"[^\w\s./+&-]",
+        r"[^\w\s.+&/-]",
         " ",
         text,
     )
@@ -97,7 +88,6 @@ def normalize_text(text: str) -> str:
 # ============================================================
 
 ACCESSORY_WORDS = {
-    # Cases
     "чехол",
     "чехлы",
     "case",
@@ -105,60 +95,53 @@ ACCESSORY_WORDS = {
     "cover",
     "covers",
 
-    # Glass / film
     "стекло",
     "glass",
-    "защитное",
-    "защитная",
+
     "пленка",
     "пленку",
     "film",
 
-    # Cable / charging
+    "защитное",
+    "защитная",
+
     "кабель",
     "cable",
-    "charger",
+
     "зарядка",
     "зарядное",
     "зарядник",
+    "charger",
 
-    # Adapters
     "адаптер",
     "adapter",
+
     "переходник",
 
-    # Audio
     "наушники",
     "headphones",
     "гарнитура",
     "earbuds",
 
-    # Holders
     "держатель",
     "holder",
-    "крепление",
-    "крепеж",
 
-    # Straps
+    "крепление",
+
     "ремешок",
     "strap",
 
-    # Cases / bumpers
     "бампер",
     "накладка",
 
-    # Power
     "powerbank",
     "пауэрбанк",
 
-    # Tripods
     "штатив",
 
-    # Bags
     "сумка",
     "bag",
 
-    # Generic
     "аксессуар",
     "аксессуары",
     "accessory",
@@ -170,8 +153,12 @@ def has_accessory_marker(
     text: str,
 ) -> bool:
 
+    normalized = normalize_text(
+        text
+    )
+
     tokens = set(
-        normalize_text(text).split()
+        normalized.split()
     )
 
     return bool(
@@ -182,17 +169,21 @@ def has_accessory_marker(
 
 
 # ============================================================
-# ATTRIBUTE EXTRACTION
+# STORAGE
 # ============================================================
 
-def extract_storage(text: str):
+def extract_storage(
+    text: str,
+):
     """
     256 GB -> 256
     512 GB -> 512
     1 TB -> 1024
     """
 
-    normalized = normalize_text(text)
+    normalized = normalize_text(
+        text
+    )
 
     matches = re.findall(
         r"\b(\d+(?:[.,]\d+)?)\s*(gb|tb)\b",
@@ -207,10 +198,14 @@ def extract_storage(text: str):
     for value, unit in matches:
 
         number = float(
-            value.replace(",", ".")
+            value.replace(
+                ",",
+                ".",
+            )
         )
 
         if unit == "tb":
+
             number *= 1024
 
         result.append(
@@ -220,13 +215,17 @@ def extract_storage(text: str):
     return result
 
 
-def extract_volume(text: str):
-    """
-    1.5 l -> 1500
-    500 ml -> 500
-    """
+# ============================================================
+# VOLUME
+# ============================================================
 
-    normalized = normalize_text(text)
+def extract_volume(
+    text: str,
+):
+
+    normalized = normalize_text(
+        text
+    )
 
     matches = re.findall(
         r"\b(\d+(?:[.,]\d+)?)\s*(ml|l)\b",
@@ -241,26 +240,37 @@ def extract_volume(text: str):
     for value, unit in matches:
 
         number = float(
-            value.replace(",", ".")
+            value.replace(
+                ",",
+                ".",
+            )
         )
 
         if unit == "l":
+
             number *= 1000
 
         result.append(
-            round(number, 2)
+            round(
+                number,
+                2,
+            )
         )
 
     return result
 
 
-def extract_weight(text: str):
-    """
-    1 kg -> 1000
-    500 g -> 500
-    """
+# ============================================================
+# WEIGHT
+# ============================================================
 
-    normalized = normalize_text(text)
+def extract_weight(
+    text: str,
+):
+
+    normalized = normalize_text(
+        text
+    )
 
     normalized = re.sub(
         r"\bгр\b",
@@ -287,22 +297,37 @@ def extract_weight(text: str):
     for value, unit in matches:
 
         number = float(
-            value.replace(",", ".")
+            value.replace(
+                ",",
+                ".",
+            )
         )
 
         if unit == "kg":
+
             number *= 1000
 
         result.append(
-            round(number, 2)
+            round(
+                number,
+                2,
+            )
         )
 
     return result
 
 
-def extract_count(text: str):
+# ============================================================
+# COUNT
+# ============================================================
 
-    normalized = normalize_text(text)
+def extract_count(
+    text: str,
+):
+
+    normalized = normalize_text(
+        text
+    )
 
     matches = re.findall(
         r"\b(\d+)\s*(?:шт|pcs|pieces)\b",
@@ -318,51 +343,17 @@ def extract_count(text: str):
     ]
 
 
-def extract_diagonal(text: str):
-
-    original = (
-        str(text or "")
-        .lower()
-        .replace(",", ".")
-    )
-
-    quoted = re.findall(
-        r"\b(\d+(?:\.\d+)?)\s*\"",
-        original,
-    )
-
-    if quoted:
-
-        return [
-            float(value)
-            for value in quoted
-        ]
-
-    normalized = normalize_text(text)
-
-    matches = re.findall(
-        r"\b(\d+(?:[.,]\d+)?)\s*(?:inch|in)\b",
-        normalized,
-    )
-
-    if not matches:
-        return None
-
-    return [
-        float(
-            value.replace(",", ".")
-        )
-        for value in matches
-    ]
-
-
 # ============================================================
-# PAMPERS
+# PAMPERS SIZE
 # ============================================================
 
-def extract_pampers_size(text: str):
+def extract_pampers_size(
+    text: str,
+):
 
-    normalized = normalize_text(text)
+    normalized = normalize_text(
+        text
+    )
 
     tokens = set(
         normalized.split()
@@ -376,12 +367,19 @@ def extract_pampers_size(text: str):
             "подгуз",
         )
     ):
+
         return None
 
     patterns = (
+
         r"\bpremium\s+care\s+([1-7])\b",
-        r"\bpampers\s+(?:premium\s+care\s+)?([1-7])\b",
+
+        r"\bpampers\s+"
+        r"(?:premium\s+care\s+)?"
+        r"([1-7])\b",
+
         r"\bразмер\s*([1-7])\b",
+
         r"\bsize\s*([1-7])\b",
     )
 
@@ -445,321 +443,23 @@ STOP_WORDS = {
     "товар",
     "купить",
     "цена",
-
-    "gb",
-    "tb",
-    "kg",
-    "g",
-    "ml",
-    "l",
-    "inch",
-    "in",
 }
 
 
 # ============================================================
-# BRAND ALIASES
+# TOKENIZATION
 # ============================================================
 
-BRAND_ALIASES = {
-
-    "apple": {
-        "apple",
-        "эппл",
-    },
-
-    "samsung": {
-        "samsung",
-        "самсунг",
-    },
-
-    "xiaomi": {
-        "xiaomi",
-        "сяоми",
-        "ксиаоми",
-    },
-
-    "redmi": {
-        "redmi",
-    },
-
-    "honor": {
-        "honor",
-        "хонор",
-    },
-
-    "huawei": {
-        "huawei",
-        "хуавей",
-    },
-
-    "google": {
-        "google",
-        "гугл",
-    },
-
-    "oneplus": {
-        "oneplus",
-    },
-
-    "oppo": {
-        "oppo",
-    },
-
-    "realme": {
-        "realme",
-    },
-
-    "sony": {
-        "sony",
-    },
-
-    "lg": {
-        "lg",
-    },
-
-    "bosch": {
-        "bosch",
-    },
-
-    "philips": {
-        "philips",
-    },
-
-    "pampers": {
-        "pampers",
-        "памперс",
-        "подгуз",
-    },
-
-    "huggies": {
-        "huggies",
-    },
-
-    "lavazza": {
-        "lavazza",
-    },
-
-    "nescafe": {
-        "nescafe",
-        "нескафе",
-    },
-
-    "coca-cola": {
-        "coca-cola",
-        "кока-кола",
-    },
-
-    "pepsi": {
-        "pepsi",
-    },
-}
-
-
-def detect_brands(text: str):
-
-    normalized = normalize_text(text)
-
-    tokens = set(
-        normalized.split()
-    )
-
-    found = set()
-
-    for canonical, aliases in BRAND_ALIASES.items():
-
-        for alias in aliases:
-
-            alias_normalized = normalize_text(
-                alias
-            )
-
-            if " " in alias_normalized:
-
-                if alias_normalized in normalized:
-
-                    found.add(
-                        canonical
-                    )
-
-                    break
-
-            else:
-
-                if alias_normalized in tokens:
-
-                    found.add(
-                        canonical
-                    )
-
-                    break
-
-    return found
-
-
-# ============================================================
-# MODEL / VARIANT
-# ============================================================
-
-def extract_variants(text: str):
-
-    normalized = normalize_text(text)
-
-    found = set()
-
-    # ВАЖНО:
-    # сначала проверяем PRO MAX,
-    # чтобы он не превращался в PRO.
-
-    if re.search(
-        r"\bpro\s+max\b",
-        normalized,
-    ):
-
-        found.add(
-            "pro max"
-        )
-
-    elif re.search(
-        r"\bpro\b",
-        normalized,
-    ):
-
-        found.add(
-            "pro"
-        )
-
-    for variant in (
-        "plus",
-        "ultra",
-        "air",
-        "mini",
-        "fe",
-        "lite",
-        "zero",
-        "light",
-        "diet",
-        "classic",
-        "fold",
-        "flip",
-        "max",
-    ):
-
-        if re.search(
-            rf"(?<!\w){re.escape(variant)}(?!\w)",
-            normalized,
-        ):
-
-            found.add(
-                variant
-            )
-
-    return found
-
-
-def variants_match(
-    query: str,
-    title: str,
-) -> bool:
-
-    query_variants = extract_variants(
-        query
-    )
-
-    title_variants = extract_variants(
-        title
-    )
-
-    # --------------------------------------------------------
-    # Если пользователь указал конкретный вариант,
-    # он обязан присутствовать в результате.
-    # --------------------------------------------------------
-
-    if query_variants:
-
-        for variant in query_variants:
-
-            if variant not in title_variants:
-
-                return False
-
-    # --------------------------------------------------------
-    # PRO != PRO MAX
-    # --------------------------------------------------------
-
-    if "pro" in query_variants:
-
-        if "pro max" in title_variants:
-
-            return False
-
-    if "pro max" in query_variants:
-
-        if "pro" not in title_variants:
-
-            return False
-
-    # --------------------------------------------------------
-    # Если пользователь не указал вариант,
-    # не подставляем другой вариант.
-    # --------------------------------------------------------
-
-    if not query_variants:
-
-        incompatible = {
-            "pro",
-            "pro max",
-            "plus",
-            "ultra",
-            "air",
-            "mini",
-            "fe",
-            "lite",
-            "fold",
-            "flip",
-        }
-
-        if title_variants.intersection(
-            incompatible
-        ):
-
-            return False
-
-    return True
-
-
-# ============================================================
-# IDENTITY TOKENS
-# ============================================================
-
-ATTRIBUTE_UNITS = {
-    "gb",
-    "tb",
-    "kg",
-    "g",
-    "ml",
-    "l",
-    "inch",
-    "in",
-    "шт",
-    "pcs",
-    "pieces",
-}
-
-
-def identity_tokens(
+def tokens_without_attributes(
     text: str,
     accessory_mode: bool = False,
 ):
 
-    normalized = normalize_text(text)
+    normalized = normalize_text(
+        text
+    )
 
-    tokens = [
-        token
-        for token in normalized.split()
-        if token not in STOP_WORDS
-        and len(token) >= 2
-    ]
+    tokens = normalized.split()
 
     result = []
 
@@ -769,15 +469,15 @@ def identity_tokens(
 
         token = tokens[index]
 
-        # ----------------------------------------------------
-        # Число + единица.
+        # --------------------------------------------
+        # Число + единица измерения
         #
         # 256 GB
-        # 1 kg
-        # 500 ml
+        # 1 KG
+        # 500 ML
         #
-        # не являются текстовой идентичностью.
-        # ----------------------------------------------------
+        # Для идентичности пропускаем.
+        # --------------------------------------------
 
         if re.fullmatch(
             r"\d+(?:[.,]\d+)?",
@@ -787,18 +487,25 @@ def identity_tokens(
             if (
                 index + 1 < len(tokens)
                 and tokens[index + 1]
-                in ATTRIBUTE_UNITS
+                in {
+                    "gb",
+                    "tb",
+                    "kg",
+                    "g",
+                    "ml",
+                    "l",
+                    "шт",
+                    "pcs",
+                    "pieces",
+                }
             ):
 
                 index += 2
 
                 continue
 
-            # Обычное число:
-            # 17, 16, 15 и т.д.
-            #
-            # Это часть модели.
-
+            # Обычное число —
+            # это часть модели.
             result.append(
                 token
             )
@@ -807,19 +514,39 @@ def identity_tokens(
 
             continue
 
-        # ----------------------------------------------------
-        # Единица измерения.
-        # ----------------------------------------------------
+        # --------------------------------------------
+        # Единица измерения
+        # --------------------------------------------
 
-        if token in ATTRIBUTE_UNITS:
+        if token in {
+            "gb",
+            "tb",
+            "kg",
+            "g",
+            "ml",
+            "l",
+            "шт",
+            "pcs",
+            "pieces",
+        }:
 
             index += 1
 
             continue
 
-        # ----------------------------------------------------
-        # Аксессуарные слова не являются моделью устройства.
-        # ----------------------------------------------------
+        # --------------------------------------------
+        # Стоп-слова
+        # --------------------------------------------
+
+        if token in STOP_WORDS:
+
+            index += 1
+
+            continue
+
+        # --------------------------------------------
+        # Слова аксессуара
+        # --------------------------------------------
 
         if (
             accessory_mode
@@ -836,34 +563,108 @@ def identity_tokens(
 
         index += 1
 
-    return set(result)
-
-
-# ============================================================
-# ACCESSORY IDENTITY
-# ============================================================
-
-def accessory_identity_match(
-    query: str,
-    title: str,
-) -> bool:
-
-    query_tokens = identity_tokens(
-        query,
-        accessory_mode=True,
+    return set(
+        result
     )
 
-    title_tokens = identity_tokens(
-        title,
-        accessory_mode=True,
+
+# ============================================================
+# MODEL VARIANT
+# ============================================================
+
+def get_variant(
+    text: str,
+):
+    """
+    Возвращает модификацию модели.
+
+    Pro Max
+    Pro
+    Plus
+    Ultra
+    Mini
+    Air
+    и т.д.
+    """
+
+    normalized = normalize_text(
+        text
+    )
+
+    if re.search(
+        r"\bpro\s+max\b",
+        normalized,
+    ):
+
+        return "pro max"
+
+    variants = (
+        "pro",
+        "plus",
+        "ultra",
+        "mini",
+        "air",
+        "lite",
+        "fe",
+        "max",
+        "fold",
+        "flip",
+    )
+
+    for variant in variants:
+
+        if re.search(
+            rf"\b{re.escape(variant)}\b",
+            normalized,
+        ):
+
+            return variant
+
+    return None
+
+
+# ============================================================
+# MODEL IDENTITY
+# ============================================================
+
+def model_identity_matches(
+    query: str,
+    title: str,
+    accessory_mode: bool,
+):
+
+    query_tokens = (
+        tokens_without_attributes(
+            query,
+            accessory_mode=True,
+        )
+    )
+
+    title_tokens = (
+        tokens_without_attributes(
+            title,
+            accessory_mode=True,
+        )
     )
 
     if not query_tokens:
 
         return False
 
-    # Каждый обязательный элемент модели
-    # должен присутствовать в названии результата.
+    # --------------------------------------------------------
+    # Все ключевые слова модели должны присутствовать.
+    #
+    # iPhone 17 Pro
+    #
+    # должно найти:
+    #
+    # iPhone 17 Pro Case
+    #
+    # но не:
+    #
+    # iPhone 16 Pro Case
+    # iPhone 17 Pro Max Case
+    # --------------------------------------------------------
 
     if not query_tokens.issubset(
         title_tokens
@@ -871,37 +672,23 @@ def accessory_identity_match(
 
         return False
 
-    return True
+    # --------------------------------------------------------
+    # Отдельно проверяем вариант.
+    # --------------------------------------------------------
 
-
-# ============================================================
-# REGULAR PRODUCT IDENTITY
-# ============================================================
-
-def regular_identity_match(
-    query: str,
-    title: str,
-) -> bool:
-
-    query_tokens = identity_tokens(
-        query,
-        accessory_mode=False,
+    query_variant = get_variant(
+        query
     )
 
-    title_tokens = identity_tokens(
-        title,
-        accessory_mode=False,
+    title_variant = get_variant(
+        title
     )
 
-    if not query_tokens:
+    if query_variant:
 
-        return True
+        if title_variant != query_variant:
 
-    if not query_tokens.issubset(
-        title_tokens
-    ):
-
-        return False
+            return False
 
     return True
 
@@ -910,106 +697,145 @@ def regular_identity_match(
 # ATTRIBUTE MATCHING
 # ============================================================
 
-def values_match(
-    query_values,
-    title_values,
-):
-
-    if not query_values:
-
-        return True
-
-    if not title_values:
-
-        return False
-
-    return all(
-        value in title_values
-        for value in query_values
-    )
-
-
 def attributes_match(
     query: str,
     title: str,
-    accessory_mode: bool = False,
-) -> bool:
+    accessory_mode: bool,
+):
+
+    # Для аксессуаров характеристики
+    # самого устройства не проверяем.
+    #
+    # Например:
+    #
+    # iPhone 17 Pro 256 GB чехол
+    #
+    # и
+    #
+    # чехол iPhone 17 Pro
+    #
+    # считаются совместимыми.
+
+    if accessory_mode:
+
+        return True
 
     # --------------------------------------------------------
-    # Для обычного товара проверяем характеристики.
+    # Storage
     # --------------------------------------------------------
 
-    if not accessory_mode:
+    query_storage = extract_storage(
+        query
+    )
 
-        checks = (
+    if query_storage:
 
-            (
-                extract_storage(query),
-                extract_storage(title),
-            ),
-
-            (
-                extract_volume(query),
-                extract_volume(title),
-            ),
-
-            (
-                extract_weight(query),
-                extract_weight(title),
-            ),
-
-            (
-                extract_count(query),
-                extract_count(title),
-            ),
-
-        )
-
-        for query_values, title_values in checks:
-
-            if not values_match(
-                query_values,
-                title_values,
-            ):
-
-                return False
-
-        # ----------------------------------------------------
-        # Диагональ
-        # ----------------------------------------------------
-
-        query_diagonal = extract_diagonal(
-            query
-        )
-
-        title_diagonal = extract_diagonal(
+        title_storage = extract_storage(
             title
         )
 
-        if query_diagonal:
+        if not title_storage:
 
-            if not title_diagonal:
+            return False
 
-                return False
+        if not all(
+            value in title_storage
+            for value in query_storage
+        ):
 
-            for value in query_diagonal:
+            return False
 
-                if value not in title_diagonal:
+    # --------------------------------------------------------
+    # Volume
+    # --------------------------------------------------------
 
-                    return False
+    query_volume = extract_volume(
+        query
+    )
+
+    if query_volume:
+
+        title_volume = extract_volume(
+            title
+        )
+
+        if not title_volume:
+
+            return False
+
+        if not all(
+            value in title_volume
+            for value in query_volume
+        ):
+
+            return False
+
+    # --------------------------------------------------------
+    # Weight
+    # --------------------------------------------------------
+
+    query_weight = extract_weight(
+        query
+    )
+
+    if query_weight:
+
+        title_weight = extract_weight(
+            title
+        )
+
+        if not title_weight:
+
+            return False
+
+        if not all(
+            value in title_weight
+            for value in query_weight
+        ):
+
+            return False
+
+    # --------------------------------------------------------
+    # Count
+    # --------------------------------------------------------
+
+    query_count = extract_count(
+        query
+    )
+
+    if query_count:
+
+        title_count = extract_count(
+            title
+        )
+
+        if not title_count:
+
+            return False
+
+        if not all(
+            value in title_count
+            for value in query_count
+        ):
+
+            return False
 
     # --------------------------------------------------------
     # Pampers
     # --------------------------------------------------------
 
-    query_pampers = extract_pampers_size(
-        query
+    query_pampers = (
+        extract_pampers_size(
+            query
+        )
     )
 
     if query_pampers is not None:
 
-        title_pampers = extract_pampers_size(
-            title
+        title_pampers = (
+            extract_pampers_size(
+                title
+            )
         )
 
         if title_pampers != query_pampers:
@@ -1017,19 +843,6 @@ def attributes_match(
             return False
 
     return True
-
-
-# ============================================================
-# ACCESSORY TYPE DETECTION
-# ============================================================
-
-def title_is_probably_accessory(
-    title: str,
-) -> bool:
-
-    return has_accessory_marker(
-        title
-    )
 
 
 # ============================================================
@@ -1059,7 +872,7 @@ def is_relevant_result(
     )
 
     # ========================================================
-    # MODE
+    # ACCESSORY MODE
     # ========================================================
 
     accessory_mode = has_accessory_marker(
@@ -1067,67 +880,41 @@ def is_relevant_result(
     )
 
     title_is_accessory = (
-        title_is_probably_accessory(
+        has_accessory_marker(
             normalized_title
         )
     )
 
-    # ========================================================
-    # PRODUCT TYPE
-    # ========================================================
-
     # --------------------------------------------------------
-    # Пользователь ищет сам товар.
-    #
-    # Чехол / стекло / кабель и т.д.
-    # не должны попадать в выдачу.
+    # Если ищем аксессуар —
+    # результат обязан быть аксессуаром.
     # --------------------------------------------------------
 
-    if not accessory_mode:
-
-        if title_is_accessory:
-
-            return False
-
-    # --------------------------------------------------------
-    # Пользователь ищет аксессуар.
-    #
-    # Сам телефон не подходит.
-    # --------------------------------------------------------
-
-    else:
+    if accessory_mode:
 
         if not title_is_accessory:
 
             return False
 
-    # ========================================================
-    # BRAND
-    # ========================================================
+    # --------------------------------------------------------
+    # Если ищем сам товар —
+    # аксессуары исключаем.
+    # --------------------------------------------------------
 
-    query_brands = detect_brands(
-        normalized_query
-    )
+    else:
 
-    title_brands = detect_brands(
-        normalized_title
-    )
-
-    if query_brands:
-
-        if not query_brands.intersection(
-            title_brands
-        ):
+        if title_is_accessory:
 
             return False
 
     # ========================================================
-    # VARIANTS
+    # MODEL
     # ========================================================
 
-    if not variants_match(
+    if not model_identity_matches(
         normalized_query,
         normalized_title,
+        accessory_mode,
     ):
 
         return False
@@ -1139,31 +926,9 @@ def is_relevant_result(
     if not attributes_match(
         normalized_query,
         normalized_title,
-        accessory_mode=accessory_mode,
+        accessory_mode,
     ):
 
         return False
-
-    # ========================================================
-    # IDENTITY
-    # ========================================================
-
-    if accessory_mode:
-
-        if not accessory_identity_match(
-            normalized_query,
-            normalized_title,
-        ):
-
-            return False
-
-    else:
-
-        if not regular_identity_match(
-            normalized_query,
-            normalized_title,
-        ):
-
-            return False
 
     return True
