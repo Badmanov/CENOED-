@@ -62,10 +62,9 @@ async def message_handler(message: Message):
         return
 
     await message.answer(
-       await message.answer(
-    "🦖 ЦЕНОЕД ПРИНЯЛ ЗАПРОС!\n\n"
-    f"🔎 Ищу:\n«{query}»\n\n"
-    "⏳ Проверяю доступные магазины..."
+        "🦖 ЦЕНОЕД ПРИНЯЛ ЗАПРОС!\n\n"
+        f"🔎 Ищу:\n«{query}»\n\n"
+        "⏳ Проверяю доступные магазины..."
     )
 
 
