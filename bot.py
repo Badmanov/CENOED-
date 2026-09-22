@@ -1,8 +1,11 @@
 import asyncio
+import html
 import os
 import re
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
 from aiogram.types import Message
 from fastapi import FastAPI
@@ -22,7 +25,7 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "0.4"
+        "version": "0.5"
     }
 
 
@@ -50,7 +53,7 @@ def format_price(price):
 @dp.message(CommandStart())
 async def start_handler(message: Message):
     await message.answer(
-        "🦖 ЦЕНОЕД на связи!\n\n"
+        "🦖 <b>ЦЕНОЕД</b> на связи!\n\n"
         "Я ищу товары, сравниваю цены и помогаю находить "
         "реальные скидки.\n\n"
         "🔎 Просто отправь название товара.\n\n"
@@ -80,8 +83,8 @@ async def message_handler(message: Message):
         return
 
     status_message = await message.answer(
-        "🦖 ЦЕНОЕД ПРИНЯЛ ЗАПРОС!\n\n"
-        f"🔎 Ищу:\n«{query}»\n\n"
+        "🦖 <b>ЦЕНОЕД ПРИНЯЛ ЗАПРОС!</b>\n\n"
+        f"🔎 Ищу:\n«{html.escape(query)}»\n\n"
         "⏳ Проверяю доступные магазины..."
     )
 
@@ -106,7 +109,8 @@ async def message_handler(message: Message):
     if not results:
         await status_message.edit_text(
             "🦖 Пока ничего не нашёл.\n\n"
-            f"Попробуй изменить запрос:\n«{query}»"
+            f"Попробуй изменить запрос:\n"
+            f"«{html.escape(query)}»"
         )
         return
 
@@ -128,15 +132,23 @@ async def message_handler(message: Message):
     results_with_price = results_with_price[:10]
 
     lines = [
-        "🦖 ЦЕНОЕД НАШЁЛ!",
+        "🦖 <b>ЦЕНОЕД НАШЁЛ!</b>",
         "",
-        f"🔎 {query}",
+        f"🔎 <b>{html.escape(query)}</b>",
         ""
     ]
 
     for index, item in enumerate(results_with_price, start=1):
-        title = item.get("title") or "Товар"
-        store = item.get("store") or "Магазин"
+        title = html.escape(
+            item.get("title") or "Товар"
+        )
+
+        store = html.escape(
+            item.get("store") or "Магазин",
+            quote=True
+        )
+
+        raw_link = item.get("link")
 
         price = format_price(
             item.get("price")
@@ -144,16 +156,36 @@ async def message_handler(message: Message):
             else item.get("price_text")
         )
 
-        lines.append(
-            f"{index}. 🛒 {store}\n"
-            f"   {title}\n"
-            f"   💰 {price}"
-        )
+        safe_price = html.escape(price)
 
-        if item.get("link"):
-            lines.append(
-                f"   🔗 {item['link']}"
+        if raw_link:
+            safe_link = html.escape(
+                str(raw_link),
+                quote=True
             )
+
+            store_line = (
+                f'<a href="{safe_link}">'
+                f"<b>{store}</b>"
+                f"</a>"
+            )
+        else:
+            store_line = f"<b>{store}</b>"
+
+        if index == 1:
+            prefix = "🥇"
+        elif index == 2:
+            prefix = "🥈"
+        elif index == 3:
+            prefix = "🥉"
+        else:
+            prefix = f"{index}."
+
+        lines.append(
+            f"{prefix} 🛒 {store_line} — "
+            f"💰 <b>{safe_price}</b>\n"
+            f"   {title}"
+        )
 
         lines.append("")
 
@@ -161,8 +193,8 @@ async def message_handler(message: Message):
 
     if isinstance(lowest_price, (int, float)):
         lines.append(
-            f"🔥 Самая низкая найденная цена: "
-            f"{format_price(lowest_price)}"
+            f"🔥 <b>Самая низкая найденная цена: "
+            f"{format_price(lowest_price)}</b>"
         )
 
     lines.append("")
@@ -178,7 +210,12 @@ async def run_bot():
     if not TOKEN:
         raise RuntimeError("BOT_TOKEN is not set")
 
-    bot = Bot(token=TOKEN)
+    bot = Bot(
+        token=TOKEN,
+        default=DefaultBotProperties(
+            parse_mode=ParseMode.HTML
+        )
+    )
 
     try:
         await dp.start_polling(bot)
