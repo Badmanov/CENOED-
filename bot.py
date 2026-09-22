@@ -4,6 +4,8 @@ import os
 import re
 from typing import Any
 
+import uvicorn
+
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -12,10 +14,9 @@ from aiogram.types import Message, Update
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
-import uvicorn
-
 from connectors.google_shopping import search_google_shopping
 from product_matching import is_relevant_result
+from search_query import build_search_query
 
 
 # ============================================================
@@ -55,7 +56,7 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "0.9",
+        "version": "1.0",
     }
 
 
@@ -85,7 +86,6 @@ def parse_price(value: Any):
     12 990 ₽
     12,990
     12990
-    12.990
     12 990,50 ₽
     """
 
@@ -112,14 +112,13 @@ def parse_price(value: Any):
         " ",
     )
 
-    # Убираем валюту и прочие символы.
+    # Оставляем цифры, запятую, точку и пробел.
     cleaned = re.sub(
         r"[^\d,.\s]",
         "",
         cleaned,
     )
 
-    # Убираем пробелы.
     cleaned = cleaned.replace(
         " ",
         "",
@@ -152,10 +151,6 @@ def parse_price(value: Any):
                 "",
             )
 
-    # Например:
-    # 12990,50
-    # 12990,5
-    # 12990,50
     elif "," in cleaned:
 
         parts = cleaned.split(",")
@@ -164,20 +159,19 @@ def parse_price(value: Any):
             len(parts) == 2
             and len(parts[1]) <= 2
         ):
+
             cleaned = cleaned.replace(
                 ",",
                 ".",
             )
 
         else:
+
             cleaned = cleaned.replace(
                 ",",
                 "",
             )
 
-    # Например:
-    # 12.990
-    # 12.990.50
     elif "." in cleaned:
 
         parts = cleaned.split(".")
@@ -255,7 +249,8 @@ async def start_handler(
         "• Pampers Premium Care 5\n"
         "• iPhone 17 Pro 256 GB\n"
         "• Coca-Cola 1.5 л\n"
-        "• Lavazza 1 кг\n\n"
+        "• Lavazza 1 кг\n"
+        "• Чехол iPhone 17 Pro\n\n"
 
         "🦖 Отправляй товар — "
         "отправлю Ценоеда на охоту!"
@@ -286,18 +281,37 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # Получаем запрос
+    # Запрос пользователя
     # --------------------------------------------------------
 
-    query = clean_query(
+    user_query = clean_query(
         message.text
     )
 
 
-    if len(query) < 2:
+    if len(user_query) < 2:
 
         await message.answer(
             "🦖 Напиши название товара подробнее."
+        )
+
+        return
+
+
+    # --------------------------------------------------------
+    # Строим поисковый запрос
+    # --------------------------------------------------------
+
+    search_query = build_search_query(
+        user_query
+    )
+
+
+    if not search_query:
+
+        await message.answer(
+            "🦖 Не удалось понять запрос. "
+            "Попробуй написать название товара подробнее."
         )
 
         return
@@ -312,16 +326,16 @@ async def message_handler(
         "🦖 <b>ЦЕНОЕД ПРИНЯЛ ЗАПРОС!</b>\n\n"
 
         f"🔎 Ищу:\n"
-        f"«{html.escape(query)}»\n\n"
+        f"«{html.escape(user_query)}»\n\n"
 
         "⏳ Проверяю доступные магазины..."
 
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # GOOGLE SHOPPING
-    # --------------------------------------------------------
+    # ========================================================
 
     try:
 
@@ -329,7 +343,7 @@ async def message_handler(
 
             search_google_shopping,
 
-            query,
+            search_query,
 
         )
 
@@ -364,9 +378,8 @@ async def message_handler(
 
             "🦖 Пока ничего не нашёл.\n\n"
 
-            "Попробуй изменить запрос:\n"
-
-            f"«{html.escape(query)}»"
+            f"🔎 Искал:\n"
+            f"«{html.escape(user_query)}»"
 
         )
 
@@ -424,7 +437,7 @@ async def message_handler(
         try:
 
             relevant = is_relevant_result(
-                query,
+                user_query,
                 item,
             )
 
@@ -457,7 +470,7 @@ async def message_handler(
             "🦖 <b>Точных совпадений не нашёл.</b>\n\n"
 
             f"🔎 Искал:\n"
-            f"«{html.escape(query)}»\n\n"
+            f"«{html.escape(user_query)}»\n\n"
 
             "Попробуй добавить бренд, "
             "модель, размер, объём "
@@ -480,7 +493,7 @@ async def message_handler(
     )
 
 
-    # Берём максимум 10 результатов.
+    # Максимум 10 результатов.
 
     filtered_results = (
         filtered_results[:10]
@@ -497,7 +510,9 @@ async def message_handler(
 
         "",
 
-        f"🔎 <b>{html.escape(query)}</b>",
+        f"🔎 <b>"
+        f"{html.escape(user_query)}"
+        f"</b>",
 
         "",
     ]
@@ -581,7 +596,7 @@ async def message_handler(
 
 
         # ----------------------------------------------------
-        # Номер результата
+        # Номер
         # ----------------------------------------------------
 
         if index == 1:
@@ -602,7 +617,7 @@ async def message_handler(
 
 
         # ----------------------------------------------------
-        # Строка товара
+        # Товар
         # ----------------------------------------------------
 
         lines.append(
@@ -714,7 +729,7 @@ async def telegram_webhook(
 
 
     # --------------------------------------------------------
-    # Получаем Telegram Update
+    # Telegram Update
     # --------------------------------------------------------
 
     data = await request.json()
