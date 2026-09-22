@@ -2,6 +2,7 @@ import asyncio
 import html
 import os
 import re
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -20,102 +21,717 @@ dp = Dispatcher()
 app = FastAPI()
 
 
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
 @app.get("/")
 async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "0.6"
+        "version": "0.7"
     }
 
 
+# ============================================================
+# BASIC TEXT HELPERS
+# ============================================================
+
 def clean_query(text: str) -> str:
-    """Очищает поисковый запрос."""
     return re.sub(r"\s+", " ", text.strip())
 
 
-def format_price(price):
-    """Красиво форматирует цену."""
-    if price is None:
-        return "Цена не указана"
+def normalize_text(text: str) -> str:
+    text = text.lower().replace("ё", "е")
+
+    replacements = {
+        "ё": "е",
+        "×": "x",
+        "–": "-",
+        "—": "-",
+        "−": "-",
+        "гб": "gb",
+        "гигабайт": "gb",
+        "гигабайта": "gb",
+        "кг": "kg",
+        "литров": "l",
+        "литра": "l",
+        "литр": "l",
+        "мл": "ml",
+        "миллилитров": "ml",
+        "шт.": "шт",
+        "штук": "шт",
+    }
+
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    text = re.sub(r"[^\w\s.\-/+]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+def normalize_model_text(text: str) -> str:
+    text = normalize_text(text)
+
+    text = re.sub(r"\bapple\b", " ", text)
+    text = re.sub(r"\bсмартфон\b", " ", text)
+    text = re.sub(r"\bтелефон\b", " ", text)
+
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+# ============================================================
+# PRICE
+# ============================================================
+
+def parse_price(value: Any):
+    """
+    Надёжно превращает цену в число.
+
+    Например:
+    113990 -> 113990.0
+    "113 990 ₽" -> 113990.0
+    "5 003 руб." -> 5003.0
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return None
+
+        return float(value)
+
+    text = str(value).strip()
+
+    if not text:
+        return None
+
+    cleaned = text.replace("\xa0", " ")
+
+    # Убираем валюту и всё лишнее,
+    # но сохраняем цифры, точку и запятую.
+    cleaned = re.sub(
+        r"[^\d,.\s]",
+        "",
+        cleaned
+    )
+
+    cleaned = cleaned.replace(" ", "")
+
+    if not cleaned:
+        return None
+
+    # Если есть и точка, и запятая —
+    # определяем последний разделитель как десятичный.
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "")
+            cleaned = cleaned.replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+
+    elif "," in cleaned:
+        parts = cleaned.split(",")
+
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            cleaned = cleaned.replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+
+    elif "." in cleaned:
+        parts = cleaned.split(".")
+
+        if len(parts) > 2:
+            cleaned = cleaned.replace(".", "")
+        elif len(parts) == 2 and len(parts[1]) == 3:
+            cleaned = cleaned.replace(".", "")
 
     try:
-        value = float(price)
+        result = float(cleaned)
 
-        if value.is_integer():
-            return f"{int(value):,} ₽".replace(",", " ")
+        if result <= 0:
+            return None
 
-        return f"{value:,.2f} ₽".replace(",", " ").replace(".", ",")
-    except (TypeError, ValueError):
-        return str(price)
+        return result
+
+    except ValueError:
+        return None
+
+
+def format_price(price):
+    numeric = parse_price(price)
+
+    if numeric is None:
+        return "Цена не указана"
+
+    if numeric.is_integer():
+        return f"{int(numeric):,} ₽".replace(",", " ")
+
+    return f"{numeric:,.2f} ₽".replace(",", " ").replace(".", ",")
+
+
+# ============================================================
+# PRODUCT MATCHING
+# ============================================================
+
+ACCESSORY_WORDS = {
+    "чехол",
+    "чехлы",
+    "case",
+    "cover",
+    "glass",
+    "стекло",
+    "защитное стекло",
+    "пленка",
+    "пленку",
+    "кабель",
+    "cable",
+    "charger",
+    "зарядка",
+    "зарядное",
+    "адаптер",
+    "adapter",
+    "наушники",
+    "headphones",
+    "гарнитура",
+    "держатель",
+    "holder",
+    "крепление",
+    "ремешок",
+    "strap",
+    "аксессуар",
+    "аксессуары",
+    "accessory",
+    "accessories",
+    "накладка",
+    "бампер",
+    "powerbank",
+    "power bank",
+    "переходник",
+    "штатив",
+    "сумка",
+    "bag",
+}
+
+NON_PRODUCT_WORDS = {
+    "для",
+    "совместимый",
+    "совместимая",
+    "совместимые",
+    "compatible",
+}
+
+BRANDS = {
+    "apple",
+    "samsung",
+    "xiaomi",
+    "redmi",
+    "honor",
+    "huawei",
+    "google",
+    "oneplus",
+    "oppo",
+    "realme",
+    "sony",
+    "lg",
+    "bosch",
+    "philips",
+    "pampers",
+    "huggies",
+    "lavazza",
+    "nescafe",
+    "coca",
+    "coca-cola",
+    "pepsi",
+}
+
+
+def has_accessory_marker(text: str) -> bool:
+    normalized = normalize_text(text)
+
+    for word in ACCESSORY_WORDS:
+        if word in normalized:
+            return True
+
+    return False
+
+
+def extract_storage(text: str):
+    normalized = normalize_text(text)
+
+    matches = re.findall(
+        r"\b(\d{2,5})\s*(?:gb|tb)\b",
+        normalized
+    )
+
+    if not matches:
+        return None
+
+    return [int(value) for value in matches]
+
+
+def extract_volume(text: str):
+    normalized = normalize_text(text)
+
+    matches = re.findall(
+        r"\b(\d+(?:[.,]\d+)?)\s*(ml|l)\b",
+        normalized
+    )
+
+    if not matches:
+        return None
+
+    result = []
+
+    for value, unit in matches:
+        number = float(value.replace(",", "."))
+
+        if unit == "l":
+            number *= 1000
+
+        result.append(round(number, 2))
+
+    return result
+
+
+def extract_weight(text: str):
+    normalized = normalize_text(text)
+
+    matches = re.findall(
+        r"\b(\d+(?:[.,]\d+)?)\s*(kg|g)\b",
+        normalized
+    )
+
+    if not matches:
+        return None
+
+    result = []
+
+    for value, unit in matches:
+        number = float(value.replace(",", "."))
+
+        if unit == "kg":
+            number *= 1000
+
+        result.append(round(number, 2))
+
+    return result
+
+
+def extract_count(text: str):
+    normalized = normalize_text(text)
+
+    matches = re.findall(
+        r"\b(\d+)\s*(?:шт|штук|pcs|pieces)\b",
+        normalized
+    )
+
+    if not matches:
+        return None
+
+    return [int(value) for value in matches]
+
+
+# ============================================================
+# IPHONE
+# ============================================================
+
+def extract_iphone_model(text: str):
+    normalized = normalize_model_text(text)
+
+    match = re.search(
+        r"\biphone\s+(\d+)\s*(pro\s*max|pro|plus|air)?\b",
+        normalized
+    )
+
+    if not match:
+        return None
+
+    number = match.group(1)
+    variant = match.group(2) or ""
+
+    variant = re.sub(r"\s+", "", variant)
+
+    return {
+        "number": number,
+        "variant": variant,
+    }
+
+
+def iphone_models_match(query: str, title: str) -> bool:
+    query_model = extract_iphone_model(query)
+
+    if not query_model:
+        return True
+
+    result_model = extract_iphone_model(title)
+
+    if not result_model:
+        return False
+
+    if result_model["number"] != query_model["number"]:
+        return False
+
+    query_variant = query_model["variant"]
+    result_variant = result_model["variant"]
+
+    # Если запрос содержит конкретную версию,
+    # результат обязан содержать именно её.
+    if query_variant:
+        if result_variant != query_variant:
+            return False
+
+    # Если запрос без варианта,
+    # например iPhone 17,
+    # не разрешаем автоматически Pro/Pro Max/Plus/Air.
+    else:
+        if result_variant:
+            return False
+
+    return True
+
+
+# ============================================================
+# PAMPERS
+# ============================================================
+
+PAMPERS_SIZE_WORDS = {
+    "newborn": 0,
+    "new born": 0,
+    "nb": 0,
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+}
 
 
 def extract_pampers_size(text: str):
-    """
-    Пытается определить размер Pampers из текста.
-    Например:
-    Pampers Premium Care 5 -> 5
-    Premium Care 1 -> 1
-    1 размер -> 1
-    size 5 -> 5
-    """
-    text = text.lower()
+    normalized = normalize_text(text)
 
+    if not (
+        "pampers" in normalized
+        or "памперс" in normalized
+        or "подгуз" in normalized
+    ):
+        return None
+
+    # Сначала ищем явную конструкцию:
+    # Premium Care 5
+    # Pampers 5
+    # размер 5
     patterns = [
-        r"\bpampers\s+premium\s+care\s+(\d+)\b",
-        r"\bpremium\s+care\s+(\d+)\b",
-        r"\bпремиум\s*(?:кэр|care)\s*(\d+)\b",
-        r"\bразмер\s*(\d+)\b",
-        r"\b(\d+)\s*размер\b",
-        r"\bsize\s*(\d+)\b",
-        r"\b(\d+)\s*size\b",
+        r"\bpremium\s+care\s+([1-7])\b",
+        r"\bpampers\s+(?:premium\s+care\s+)?([1-7])\b",
+        r"\bразмер\s*([1-7])\b",
+        r"\bsize\s*([1-7])\b",
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(pattern, normalized)
 
         if match:
             return int(match.group(1))
 
+    # Newborn — отдельный размер.
+    if "newborn" in normalized or "new born" in normalized:
+        return 0
+
+    # ВАЖНО:
+    # Не считаем диапазон веса вроде 5-9 кг
+    # размером Pampers 5.
+    weight_range = re.search(
+        r"\b\d+\s*-\s*\d+\s*kg\b",
+        normalized
+    )
+
+    if weight_range:
+        # Если больше никаких явных признаков размера нет,
+        # размер не определяем.
+        return None
+
     return None
 
 
-def is_pampers_query(query: str) -> bool:
-    """Определяет, является ли запрос поиском Pampers."""
-    text = query.lower()
-
-    return (
-        "pampers" in text
-        or "памперс" in text
-        or "подгузник" in text
-    )
-
-
-def is_relevant_result(query: str, item: dict) -> bool:
-    """
-    Проверяет, соответствует ли найденный товар запросу.
-    Для Pampers Premium Care с указанным размером
-    применяем строгую проверку размера.
-    """
-
-    if not is_pampers_query(query):
-        return True
-
+def pampers_match(query: str, title: str) -> bool:
     query_size = extract_pampers_size(query)
 
     if query_size is None:
         return True
 
-    title = item.get("title") or ""
     result_size = extract_pampers_size(title)
 
-    # Если пользователь указал конкретный размер,
-    # результат должен иметь тот же явно определённый размер.
+    # Если запрос требует конкретный размер,
+    # результат тоже должен явно его содержать.
     if result_size != query_size:
         return False
 
     return True
 
+
+# ============================================================
+# GENERIC ATTRIBUTE MATCHING
+# ============================================================
+
+def numbers_without_attributes(text: str):
+    """
+    Возвращает числа, которые не являются очевидными
+    GB / kg / g / ml / l / количеством.
+    """
+
+    normalized = normalize_text(text)
+
+    protected_spans = []
+
+    patterns = [
+        r"\b\d+(?:[.,]\d+)?\s*(?:gb|tb)\b",
+        r"\b\d+(?:[.,]\d+)?\s*(?:kg|g)\b",
+        r"\b\d+(?:[.,]\d+)?\s*(?:ml|l)\b",
+        r"\b\d+\s*(?:шт|штук|pcs|pieces)\b",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, normalized):
+            protected_spans.append(match.span())
+
+    numbers = []
+
+    for match in re.finditer(r"\b\d+(?:[.,]\d+)?\b", normalized):
+        start, end = match.span()
+
+        if any(
+            start >= p_start and end <= p_end
+            for p_start, p_end in protected_spans
+        ):
+            continue
+
+        numbers.append(match.group(0))
+
+    return numbers
+
+
+def important_tokens(text: str):
+    normalized = normalize_model_text(text)
+
+    tokens = normalized.split()
+
+    ignored = {
+        "и",
+        "или",
+        "для",
+        "с",
+        "со",
+        "на",
+        "в",
+        "из",
+        "по",
+        "шт",
+        "штук",
+        "новый",
+        "новая",
+        "оригинал",
+        "оригинальный",
+        "original",
+        "global",
+        "россия",
+        "российский",
+        "ru",
+    }
+
+    return {
+        token
+        for token in tokens
+        if token not in ignored
+        and len(token) >= 2
+    }
+
+
+def brand_match(query: str, title: str) -> bool:
+    q = normalize_text(query)
+    t = normalize_text(title)
+
+    query_brands = [
+        brand for brand in BRANDS
+        if brand in q
+    ]
+
+    if not query_brands:
+        return True
+
+    return any(brand in t for brand in query_brands)
+
+
+def attribute_lists_match(query: str, title: str) -> bool:
+    # Память
+    query_storage = extract_storage(query)
+
+    if query_storage:
+        result_storage = extract_storage(title)
+
+        if not result_storage:
+            return False
+
+        for required in query_storage:
+            if required not in result_storage:
+                return False
+
+    # Объём
+    query_volume = extract_volume(query)
+
+    if query_volume:
+        result_volume = extract_volume(title)
+
+        if not result_volume:
+            return False
+
+        for required in query_volume:
+            if required not in result_volume:
+                return False
+
+    # Вес
+    query_weight = extract_weight(query)
+
+    if query_weight:
+        result_weight = extract_weight(title)
+
+        if not result_weight:
+            return False
+
+        for required in query_weight:
+            if required not in result_weight:
+                return False
+
+    # Количество
+    query_count = extract_count(query)
+
+    if query_count:
+        result_count = extract_count(title)
+
+        if not result_count:
+            return False
+
+        for required in query_count:
+            if required not in result_count:
+                return False
+
+    return True
+
+
+# ============================================================
+# UNIVERSAL PRODUCT MATCH
+# ============================================================
+
+def is_relevant_result(query: str, item: dict) -> bool:
+    title = item.get("title") or ""
+
+    if not title:
+        return False
+
+    query_normalized = normalize_text(query)
+    title_normalized = normalize_text(title)
+
+    # --------------------------------------------------------
+    # 1. Аксессуары
+    # --------------------------------------------------------
+
+    query_is_accessory = has_accessory_marker(query)
+
+    if not query_is_accessory:
+        if has_accessory_marker(title):
+            return False
+
+    # --------------------------------------------------------
+    # 2. Бренд
+    # --------------------------------------------------------
+
+    if not brand_match(query, title):
+        return False
+
+    # --------------------------------------------------------
+    # 3. iPhone
+    # --------------------------------------------------------
+
+    if "iphone" in query_normalized:
+        if not iphone_models_match(query, title):
+            return False
+
+    # --------------------------------------------------------
+    # 4. Pampers
+    # --------------------------------------------------------
+
+    if (
+        "pampers" in query_normalized
+        or "памперс" in query_normalized
+        or "подгуз" in query_normalized
+    ):
+        if not pampers_match(query, title):
+            return False
+
+    # --------------------------------------------------------
+    # 5. Обязательные характеристики
+    # --------------------------------------------------------
+
+    if not attribute_lists_match(query, title):
+        return False
+
+    # --------------------------------------------------------
+    # 6. Проверка важных слов
+    # --------------------------------------------------------
+
+    q_tokens = important_tokens(query)
+    t_tokens = important_tokens(title)
+
+    # Удаляем характеристики из token-сравнения.
+    # Они проверяются отдельно выше.
+    characteristic_tokens = {
+        "gb",
+        "tb",
+        "kg",
+        "ml",
+        "l",
+        "g",
+        "шт",
+        "pcs",
+        "pieces",
+    }
+
+    q_tokens -= characteristic_tokens
+    t_tokens -= characteristic_tokens
+
+    # Для коротких запросов достаточно наличия
+    # основных слов.
+    if len(q_tokens) <= 2:
+        if not q_tokens.intersection(t_tokens):
+            return False
+
+    # Для длинного запроса требуем,
+    # чтобы значительная часть важных слов совпадала.
+    else:
+        overlap = len(q_tokens.intersection(t_tokens))
+        ratio = overlap / len(q_tokens)
+
+        if ratio < 0.50:
+            return False
+
+    return True
+
+
+# ============================================================
+# START
+# ============================================================
 
 @dp.message(CommandStart())
 async def start_handler(message: Message):
@@ -132,6 +748,10 @@ async def start_handler(message: Message):
         "🦖 Отправляй товар — отправлю Ценоеда на охоту!"
     )
 
+
+# ============================================================
+# MESSAGE HANDLER
+# ============================================================
 
 @dp.message()
 async def message_handler(message: Message):
@@ -171,6 +791,7 @@ async def message_handler(message: Message):
             "🦖 Не удалось получить результаты поиска.\n\n"
             "Попробуй повторить запрос немного позже."
         )
+
         return
 
     if not results:
@@ -179,45 +800,65 @@ async def message_handler(message: Message):
             f"Попробуй изменить запрос:\n"
             f"«{html.escape(query)}»"
         )
+
         return
 
-    # Оставляем только результаты с ценой.
-    results_with_price = [
-        item
-        for item in results
-        if item.get("price") is not None
-        or item.get("price_text")
-    ]
+    # --------------------------------------------------------
+    # Оставляем только товары с корректной ценой.
+    # --------------------------------------------------------
 
-    # Проверяем соответствие товара запросу.
+    results_with_price = []
+
+    for item in results:
+        raw_price = (
+            item.get("price")
+            if item.get("price") is not None
+            else item.get("price_text")
+        )
+
+        numeric_price = parse_price(raw_price)
+
+        if numeric_price is None:
+            continue
+
+        item["numeric_price"] = numeric_price
+
+        results_with_price.append(item)
+
+    # --------------------------------------------------------
+    # PRODUCT MATCHING
+    # --------------------------------------------------------
+
     filtered_results = [
         item
         for item in results_with_price
         if is_relevant_result(query, item)
     ]
 
-    # Если строгий фильтр ничего не оставил,
-    # показываем понятное сообщение вместо неправильных товаров.
     if not filtered_results:
         await status_message.edit_text(
             "🦖 <b>Точных совпадений не нашёл.</b>\n\n"
             f"🔎 Искал:\n«{html.escape(query)}»\n\n"
-            "Попробуй добавить бренд, модель, размер "
-            "или объём товара."
+            "Попробуй добавить бренд, модель, размер, "
+            "объём или другую характеристику товара."
         )
+
         return
 
-    # Сортируем от самой низкой цены.
+    # --------------------------------------------------------
+    # Сортировка по реальной числовой цене
+    # --------------------------------------------------------
+
     filtered_results.sort(
-        key=lambda item: (
-            item.get("price")
-            if isinstance(item.get("price"), (int, float))
-            else float("inf")
-        )
+        key=lambda item: item["numeric_price"]
     )
 
-    # Показываем максимум 10 результатов.
+    # Максимум 10 результатов.
     filtered_results = filtered_results[:10]
+
+    # --------------------------------------------------------
+    # OUTPUT
+    # --------------------------------------------------------
 
     lines = [
         "🦖 <b>ЦЕНОЕД НАШЁЛ!</b>",
@@ -226,7 +867,10 @@ async def message_handler(message: Message):
         ""
     ]
 
-    for index, item in enumerate(filtered_results, start=1):
+    for index, item in enumerate(
+        filtered_results,
+        start=1
+    ):
         title = html.escape(
             item.get("title") or "Товар"
         )
@@ -239,9 +883,7 @@ async def message_handler(message: Message):
         raw_link = item.get("link")
 
         price = format_price(
-            item.get("price")
-            if item.get("price") is not None
-            else item.get("price_text")
+            item["numeric_price"]
         )
 
         safe_price = html.escape(price)
@@ -257,6 +899,7 @@ async def message_handler(message: Message):
                 f"<b>{store}</b>"
                 f"</a>"
             )
+
         else:
             store_line = f"<b>{store}</b>"
 
@@ -277,16 +920,17 @@ async def message_handler(message: Message):
 
         lines.append("")
 
-    lowest_price = filtered_results[0].get("price")
+    lowest_price = filtered_results[0]["numeric_price"]
 
-    if isinstance(lowest_price, (int, float)):
-        lines.append(
-            f"🔥 <b>Самая низкая найденная цена: "
-            f"{format_price(lowest_price)}</b>"
-        )
+    lines.append(
+        f"🔥 <b>Самая низкая найденная цена: "
+        f"{format_price(lowest_price)}</b>"
+    )
 
     lines.append("")
-    lines.append("🔔 Скоро добавим отслеживание цены.")
+    lines.append(
+        "🔔 Скоро добавим отслеживание цены."
+    )
 
     await status_message.edit_text(
         "\n".join(lines),
@@ -294,9 +938,15 @@ async def message_handler(message: Message):
     )
 
 
+# ============================================================
+# BOT
+# ============================================================
+
 async def run_bot():
     if not TOKEN:
-        raise RuntimeError("BOT_TOKEN is not set")
+        raise RuntimeError(
+            "BOT_TOKEN is not set"
+        )
 
     bot = Bot(
         token=TOKEN,
@@ -307,20 +957,35 @@ async def run_bot():
 
     try:
         await dp.start_polling(bot)
+
     finally:
         await bot.session.close()
 
 
+# ============================================================
+# WEB SERVER
+# ============================================================
+
 async def run_web():
+    port = int(
+        os.getenv("PORT", "10000")
+    )
+
     config = uvicorn.Config(
         app,
         host="0.0.0.0",
-        port=int(os.getenv("PORT", "10000"))
+        port=port,
+        log_level="info"
     )
 
     server = uvicorn.Server(config)
+
     await server.serve()
 
+
+# ============================================================
+# MAIN
+# ============================================================
 
 async def main():
     await asyncio.gather(
