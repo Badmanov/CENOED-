@@ -27,6 +27,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 BASE_WEBHOOK_URL = "https://cenoed.onrender.com"
+
 WEBHOOK_PATH = "/telegram/webhook"
 
 WEBHOOK_URL = (
@@ -46,7 +47,7 @@ bot: Bot | None = None
 
 
 # ============================================================
-# HEALTH
+# HEALTH CHECK
 # ============================================================
 
 @app.get("/")
@@ -55,15 +56,17 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "1.2",
+        "version": "1.3",
     }
 
 
 # ============================================================
-# HELPERS
+# BASIC HELPERS
 # ============================================================
 
-def clean_query(text: str) -> str:
+def clean_query(
+    text: str,
+) -> str:
 
     return re.sub(
         r"\s+",
@@ -73,33 +76,53 @@ def clean_query(text: str) -> str:
 
 
 # ============================================================
-# PRICE
+# PRICE PARSING
 # ============================================================
 
-def parse_price(value: Any):
+def parse_price(
+    value: Any,
+):
 
     if value is None:
+
         return None
 
-    if isinstance(value, bool):
+
+    if isinstance(
+        value,
+        bool,
+    ):
+
         return None
 
-    if isinstance(value, (int, float)):
+
+    if isinstance(
+        value,
+        (int, float),
+    ):
 
         if value <= 0:
+
             return None
 
         return float(value)
 
-    text = str(value).strip()
+
+    text = str(
+        value
+    ).strip()
+
 
     if not text:
+
         return None
+
 
     text = text.replace(
         "\xa0",
         " ",
     )
+
 
     text = re.sub(
         r"[^\d,.\s]",
@@ -107,17 +130,32 @@ def parse_price(value: Any):
         text,
     )
 
+
     text = text.replace(
         " ",
         "",
     )
 
+
     if not text:
+
         return None
 
-    if "," in text and "." in text:
 
-        if text.rfind(",") > text.rfind("."):
+    # --------------------------------------------------------
+    # 12.990,50
+    # --------------------------------------------------------
+
+    if (
+        "," in text
+        and "." in text
+    ):
+
+        if (
+            text.rfind(",")
+            >
+            text.rfind(".")
+        ):
 
             text = text.replace(
                 ".",
@@ -135,6 +173,12 @@ def parse_price(value: Any):
                 ",",
                 "",
             )
+
+
+    # --------------------------------------------------------
+    # 12,990
+    # 12,99
+    # --------------------------------------------------------
 
     elif "," in text:
 
@@ -157,6 +201,12 @@ def parse_price(value: Any):
                 "",
             )
 
+
+    # --------------------------------------------------------
+    # 12.990
+    # 12.990,50
+    # --------------------------------------------------------
+
     elif "." in text:
 
         parts = text.split(".")
@@ -178,48 +228,163 @@ def parse_price(value: Any):
                 "",
             )
 
+
     try:
 
-        result = float(text)
+        result = float(
+            text
+        )
+
 
         if result <= 0:
+
             return None
 
+
         return result
+
 
     except ValueError:
 
         return None
 
 
-def format_price(price):
+# ============================================================
+# PRICE FORMAT
+# ============================================================
+
+def format_price(
+    price,
+):
 
     numeric = parse_price(
         price
     )
 
+
     if numeric is None:
+
         return "Цена не указана"
+
 
     if numeric.is_integer():
 
         return (
             f"{int(numeric):,} ₽"
-            .replace(",", " ")
+            .replace(
+                ",",
+                " ",
+            )
         )
+
 
     return (
         f"{numeric:,.2f} ₽"
-        .replace(",", " ")
-        .replace(".", ",")
+        .replace(
+            ",",
+            " ",
+        )
+        .replace(
+            ".",
+            ",",
+        )
     )
 
 
 # ============================================================
-# START
+# DISCOUNT
 # ============================================================
 
-@dp.message(CommandStart())
+def calculate_discount(
+    current_price,
+    old_price,
+):
+    """
+    Рассчитывает скидку относительно
+    переданной старой цены.
+
+    Важно:
+
+    Это НЕ доказательство реальной скидки.
+    Это скидка по старой цене,
+    которую передал источник.
+    """
+
+    current = parse_price(
+        current_price
+    )
+
+    old = parse_price(
+        old_price
+    )
+
+
+    if current is None:
+
+        return None
+
+
+    if old is None:
+
+        return None
+
+
+    if old <= current:
+
+        return None
+
+
+    discount = (
+        (old - current)
+        / old
+        * 100
+    )
+
+
+    if discount <= 0:
+
+        return None
+
+
+    if discount >= 100:
+
+        return None
+
+
+    return discount
+
+
+def format_discount(
+    discount,
+):
+
+    if discount is None:
+
+        return None
+
+
+    if discount >= 10:
+
+        return (
+            f"−{discount:.0f}%"
+        )
+
+
+    return (
+        f"−{discount:.1f}%"
+    ).replace(
+        ".",
+        ",",
+    )
+
+
+# ============================================================
+# /START
+# ============================================================
+
+@dp.message(
+    CommandStart()
+)
 async def start_handler(
     message: Message,
 ):
@@ -229,7 +394,7 @@ async def start_handler(
         "🦖 <b>ЦЕНОЕД</b> на связи!\n\n"
 
         "Я ищу товары, сравниваю цены "
-        "и помогаю находить реальные скидки.\n\n"
+        "и помогаю находить выгодные предложения.\n\n"
 
         "🔎 Просто отправь название товара.\n\n"
 
@@ -255,6 +420,10 @@ async def message_handler(
     message: Message,
 ):
 
+    # --------------------------------------------------------
+    # Проверяем текст
+    # --------------------------------------------------------
+
     if not message.text:
 
         await message.answer(
@@ -265,7 +434,7 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # USER QUERY
+    # Запрос пользователя
     # --------------------------------------------------------
 
     user_query = clean_query(
@@ -283,7 +452,7 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # SEARCH QUERY
+    # Строим поисковый запрос
     # --------------------------------------------------------
 
     search_query = build_search_query(
@@ -296,6 +465,7 @@ async def message_handler(
         flush=True,
     )
 
+
     print(
         f"SEARCH QUERY: {search_query}",
         flush=True,
@@ -306,7 +476,10 @@ async def message_handler(
 
         await message.answer(
 
-            "🦖 Не удалось понять запрос."
+            "🦖 Не удалось понять запрос.\n\n"
+
+            "Попробуй написать название "
+            "товара подробнее."
 
         )
 
@@ -314,7 +487,7 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # STATUS
+    # Сообщение о поиске
     # --------------------------------------------------------
 
     status_message = await message.answer(
@@ -343,6 +516,7 @@ async def message_handler(
 
         )
 
+
     except Exception as e:
 
         print(
@@ -351,51 +525,23 @@ async def message_handler(
             flush=True,
         )
 
+
         await status_message.edit_text(
 
             "🦖 Не удалось получить "
             "результаты поиска.\n\n"
 
-            "Попробуй повторить запрос позже."
+            "Попробуй повторить запрос "
+            "немного позже."
 
         )
 
         return
 
 
-    # ========================================================
-    # RAW RESULTS DEBUG
-    # ========================================================
-
-    print(
-        f"RAW RESULTS: {len(results)}",
-        flush=True,
-    )
-
-
-    for index, item in enumerate(
-        results[:15],
-        start=1,
-    ):
-
-        print(
-            f"RESULT {index}: "
-            f"{item.get('title')}",
-            flush=True,
-        )
-
-        print(
-            f"RESULT {index} STORE: "
-            f"{item.get('store')}",
-            flush=True,
-        )
-
-        print(
-            f"RESULT {index} PRICE: "
-            f"{item.get('price')}",
-            flush=True,
-        )
-
+    # --------------------------------------------------------
+    # Нет результатов
+    # --------------------------------------------------------
 
     if not results:
 
@@ -422,11 +568,17 @@ async def message_handler(
 
         raw_price = (
 
-            item.get("price")
+            item.get(
+                "price"
+            )
 
-            if item.get("price") is not None
+            if item.get(
+                "price"
+            ) is not None
 
-            else item.get("price_text")
+            else item.get(
+                "price_text"
+            )
 
         )
 
@@ -441,9 +593,58 @@ async def message_handler(
             continue
 
 
-        item["numeric_price"] = (
-            numeric_price
+        item[
+            "numeric_price"
+        ] = numeric_price
+
+
+        # ----------------------------------------------------
+        # Старая цена
+        # ----------------------------------------------------
+
+        raw_old_price = (
+
+            item.get(
+                "old_price"
+            )
+
+            if item.get(
+                "old_price"
+            ) is not None
+
+            else item.get(
+                "old_price_text"
+            )
+
         )
+
+
+        numeric_old_price = parse_price(
+            raw_old_price
+        )
+
+
+        item[
+            "numeric_old_price"
+        ] = numeric_old_price
+
+
+        # ----------------------------------------------------
+        # Скидка
+        # ----------------------------------------------------
+
+        discount = calculate_discount(
+
+            numeric_price,
+
+            numeric_old_price,
+
+        )
+
+
+        item[
+            "discount_percent"
+        ] = discount
 
 
         results_with_price.append(
@@ -451,30 +652,14 @@ async def message_handler(
         )
 
 
-    print(
-        f"RESULTS WITH PRICE: "
-        f"{len(results_with_price)}",
-        flush=True,
-    )
-
-
     # ========================================================
-    # PRODUCT MATCHING DEBUG
+    # PRODUCT MATCHING
     # ========================================================
 
     filtered_results = []
 
 
-    for index, item in enumerate(
-        results_with_price,
-        start=1,
-    ):
-
-        title = (
-            item.get("title")
-            or ""
-        )
-
+    for item in results_with_price:
 
         try:
 
@@ -486,11 +671,13 @@ async def message_handler(
 
             )
 
+
         except Exception as e:
 
             print(
 
-                f"MATCH ERROR {index}: "
+                "MATCHING ERROR: "
+
                 f"{type(e).__name__}: {e}",
 
                 flush=True,
@@ -500,17 +687,6 @@ async def message_handler(
             relevant = False
 
 
-        print(
-
-            f"MATCH {index}: "
-            f"{relevant} | "
-            f"{title}",
-
-            flush=True,
-
-        )
-
-
         if relevant:
 
             filtered_results.append(
@@ -518,16 +694,9 @@ async def message_handler(
             )
 
 
-    print(
-        f"FILTERED RESULTS: "
-        f"{len(filtered_results)}",
-        flush=True,
-    )
-
-
-    # ========================================================
-    # NO EXACT MATCH
-    # ========================================================
+    # --------------------------------------------------------
+    # Нет точных совпадений
+    # --------------------------------------------------------
 
     if not filtered_results:
 
@@ -554,10 +723,14 @@ async def message_handler(
     filtered_results.sort(
 
         key=lambda item:
-        item["numeric_price"]
+        item[
+            "numeric_price"
+        ]
 
     )
 
+
+    # Максимум 10 результатов.
 
     filtered_results = (
         filtered_results[:10]
@@ -583,6 +756,10 @@ async def message_handler(
     ]
 
 
+    # ========================================================
+    # RESULTS
+    # ========================================================
+
     for index, item in enumerate(
 
         filtered_results,
@@ -593,7 +770,9 @@ async def message_handler(
 
         title = html.escape(
 
-            item.get("title")
+            item.get(
+                "title"
+            )
             or "Товар"
 
         )
@@ -601,7 +780,9 @@ async def message_handler(
 
         store = html.escape(
 
-            item.get("store")
+            item.get(
+                "store"
+            )
             or "Магазин",
 
             quote=True,
@@ -614,14 +795,74 @@ async def message_handler(
         )
 
 
-        price = format_price(
+        current_price = item[
+            "numeric_price"
+        ]
 
-            item[
-                "numeric_price"
-            ]
 
+        current_price_text = (
+            format_price(
+                current_price
+            )
         )
 
+
+        old_price = item.get(
+            "numeric_old_price"
+        )
+
+
+        discount = item.get(
+            "discount_percent"
+        )
+
+
+        discount_text = (
+            format_discount(
+                discount
+            )
+        )
+
+
+        # ----------------------------------------------------
+        # Цена
+        # ----------------------------------------------------
+
+        if (
+            old_price is not None
+            and discount_text
+        ):
+
+            price_line = (
+
+                f"💰 <b>"
+                f"{html.escape(current_price_text)}"
+                f"</b> "
+
+                f"🔥 <b>"
+                f"{html.escape(discount_text)}"
+                f"</b>\n"
+
+                f"   <s>"
+                f"{html.escape(format_price(old_price))}"
+                f"</s>"
+
+            )
+
+        else:
+
+            price_line = (
+
+                f"💰 <b>"
+                f"{html.escape(current_price_text)}"
+                f"</b>"
+
+            )
+
+
+        # ----------------------------------------------------
+        # Магазин
+        # ----------------------------------------------------
 
         if raw_link:
 
@@ -653,6 +894,10 @@ async def message_handler(
             )
 
 
+        # ----------------------------------------------------
+        # Номер
+        # ----------------------------------------------------
+
         if index == 1:
 
             prefix = "🥇"
@@ -670,14 +915,15 @@ async def message_handler(
             prefix = f"{index}."
 
 
+        # ----------------------------------------------------
+        # Результат
+        # ----------------------------------------------------
+
         lines.append(
 
             f"{prefix} 🛒 "
-
             f"{store_line} — "
-
-            f"💰 <b>{html.escape(price)}</b>\n"
-
+            f"{price_line}\n"
             f"   {title}"
 
         )
@@ -686,10 +932,19 @@ async def message_handler(
         lines.append("")
 
 
-    lowest_price = (
+    # ========================================================
+    # LOWEST PRICE
+    # ========================================================
 
+    lowest_item = (
         filtered_results[0]
-        ["numeric_price"]
+    )
+
+
+    lowest_price = (
+        lowest_item[
+            "numeric_price"
+        ]
     )
 
 
@@ -705,16 +960,78 @@ async def message_handler(
     )
 
 
+    # ========================================================
+    # DISCOUNT SUMMARY
+    # ========================================================
+
+    discounted_items = [
+
+        item
+
+        for item in filtered_results
+
+        if item.get(
+            "discount_percent"
+        ) is not None
+
+    ]
+
+
+    if discounted_items:
+
+        best_discount_item = max(
+
+            discounted_items,
+
+            key=lambda item:
+            item[
+                "discount_percent"
+            ],
+
+        )
+
+
+        best_discount = (
+            best_discount_item[
+                "discount_percent"
+            ]
+        )
+
+
+        if best_discount is not None:
+
+            lines.append("")
+
+
+            lines.append(
+
+                "🏷 <b>Максимальная скидка "
+                "по данным магазина: "
+
+                f"{format_discount(best_discount)}"
+
+                "</b>"
+
+            )
+
+
     lines.append("")
 
 
     lines.append(
 
-        "🔔 Скоро добавим "
-        "отслеживание цены."
+        "ℹ️ Скидка рассчитана "
+        "по указанной старой цене. "
+
+        "Проверку реальной истории цены "
+        "добавим следующим этапом."
 
     )
 
+
+    # ========================================================
+    # SEND RESULT
+    # ========================================================
 
     await status_message.edit_text(
 
@@ -726,10 +1043,12 @@ async def message_handler(
 
 
 # ============================================================
-# WEBHOOK
+# TELEGRAM WEBHOOK
 # ============================================================
 
-@app.post(WEBHOOK_PATH)
+@app.post(
+    WEBHOOK_PATH
+)
 async def telegram_webhook(
 
     request: Request,
@@ -740,6 +1059,10 @@ async def telegram_webhook(
         ),
 
 ):
+
+    # --------------------------------------------------------
+    # Проверяем секрет
+    # --------------------------------------------------------
 
     if not WEBHOOK_SECRET:
 
@@ -769,6 +1092,10 @@ async def telegram_webhook(
         )
 
 
+    # --------------------------------------------------------
+    # Telegram Update
+    # --------------------------------------------------------
+
     data = await request.json()
 
 
@@ -782,6 +1109,10 @@ async def telegram_webhook(
 
     )
 
+
+    # --------------------------------------------------------
+    # Передаём update в aiogram
+    # --------------------------------------------------------
 
     await dp.feed_update(
 
@@ -858,7 +1189,9 @@ async def setup_webhook():
 # STARTUP
 # ============================================================
 
-@app.on_event("startup")
+@app.on_event(
+    "startup"
+)
 async def startup_event():
 
     await setup_webhook()
@@ -868,7 +1201,9 @@ async def startup_event():
 # SHUTDOWN
 # ============================================================
 
-@app.on_event("shutdown")
+@app.on_event(
+    "shutdown"
+)
 async def shutdown_event():
 
     global bot
@@ -882,7 +1217,7 @@ async def shutdown_event():
 
 
 # ============================================================
-# SERVER
+# WEB SERVER
 # ============================================================
 
 async def run_web():
