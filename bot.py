@@ -8,14 +8,19 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart
-from aiogram.types import Message
-from fastapi import FastAPI
+from aiogram.types import Message, Update
+from fastapi import FastAPI, Header, HTTPException, Request
 import uvicorn
 
 from connectors.google_shopping import search_google_shopping
 
 
 TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
+
+BASE_WEBHOOK_URL = "https://cenoed.onrender.com"
+WEBHOOK_PATH = "/telegram/webhook"
+WEBHOOK_URL = f"{BASE_WEBHOOK_URL}{WEBHOOK_PATH}"
 
 dp = Dispatcher()
 app = FastAPI()
@@ -30,7 +35,7 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "0.7"
+        "version": "0.8"
     }
 
 
@@ -90,15 +95,6 @@ def normalize_model_text(text: str) -> str:
 # ============================================================
 
 def parse_price(value: Any):
-    """
-    Надёжно превращает цену в число.
-
-    Например:
-    113990 -> 113990.0
-    "113 990 ₽" -> 113990.0
-    "5 003 руб." -> 5003.0
-    """
-
     if value is None:
         return None
 
@@ -118,8 +114,6 @@ def parse_price(value: Any):
 
     cleaned = text.replace("\xa0", " ")
 
-    # Убираем валюту и всё лишнее,
-    # но сохраняем цифры, точку и запятую.
     cleaned = re.sub(
         r"[^\d,.\s]",
         "",
@@ -131,8 +125,6 @@ def parse_price(value: Any):
     if not cleaned:
         return None
 
-    # Если есть и точка, и запятая —
-    # определяем последний разделитель как десятичный.
     if "," in cleaned and "." in cleaned:
         if cleaned.rfind(",") > cleaned.rfind("."):
             cleaned = cleaned.replace(".", "")
@@ -385,15 +377,10 @@ def iphone_models_match(query: str, title: str) -> bool:
     query_variant = query_model["variant"]
     result_variant = result_model["variant"]
 
-    # Если запрос содержит конкретную версию,
-    # результат обязан содержать именно её.
     if query_variant:
         if result_variant != query_variant:
             return False
 
-    # Если запрос без варианта,
-    # например iPhone 17,
-    # не разрешаем автоматически Pro/Pro Max/Plus/Air.
     else:
         if result_variant:
             return False
@@ -429,10 +416,6 @@ def extract_pampers_size(text: str):
     ):
         return None
 
-    # Сначала ищем явную конструкцию:
-    # Premium Care 5
-    # Pampers 5
-    # размер 5
     patterns = [
         r"\bpremium\s+care\s+([1-7])\b",
         r"\bpampers\s+(?:premium\s+care\s+)?([1-7])\b",
@@ -446,21 +429,15 @@ def extract_pampers_size(text: str):
         if match:
             return int(match.group(1))
 
-    # Newborn — отдельный размер.
     if "newborn" in normalized or "new born" in normalized:
         return 0
 
-    # ВАЖНО:
-    # Не считаем диапазон веса вроде 5-9 кг
-    # размером Pampers 5.
     weight_range = re.search(
         r"\b\d+\s*-\s*\d+\s*kg\b",
         normalized
     )
 
     if weight_range:
-        # Если больше никаких явных признаков размера нет,
-        # размер не определяем.
         return None
 
     return None
@@ -474,8 +451,6 @@ def pampers_match(query: str, title: str) -> bool:
 
     result_size = extract_pampers_size(title)
 
-    # Если запрос требует конкретный размер,
-    # результат тоже должен явно его содержать.
     if result_size != query_size:
         return False
 
@@ -487,11 +462,6 @@ def pampers_match(query: str, title: str) -> bool:
 # ============================================================
 
 def numbers_without_attributes(text: str):
-    """
-    Возвращает числа, которые не являются очевидными
-    GB / kg / g / ml / l / количеством.
-    """
-
     normalized = normalize_text(text)
 
     protected_spans = []
@@ -575,7 +545,6 @@ def brand_match(query: str, title: str) -> bool:
 
 
 def attribute_lists_match(query: str, title: str) -> bool:
-    # Память
     query_storage = extract_storage(query)
 
     if query_storage:
@@ -588,7 +557,6 @@ def attribute_lists_match(query: str, title: str) -> bool:
             if required not in result_storage:
                 return False
 
-    # Объём
     query_volume = extract_volume(query)
 
     if query_volume:
@@ -601,7 +569,6 @@ def attribute_lists_match(query: str, title: str) -> bool:
             if required not in result_volume:
                 return False
 
-    # Вес
     query_weight = extract_weight(query)
 
     if query_weight:
@@ -614,7 +581,6 @@ def attribute_lists_match(query: str, title: str) -> bool:
             if required not in result_weight:
                 return False
 
-    # Количество
     query_count = extract_count(query)
 
     if query_count:
@@ -641,36 +607,17 @@ def is_relevant_result(query: str, item: dict) -> bool:
         return False
 
     query_normalized = normalize_text(query)
-    title_normalized = normalize_text(title)
 
-    # --------------------------------------------------------
-    # 1. Аксессуары
-    # --------------------------------------------------------
-
-    query_is_accessory = has_accessory_marker(query)
-
-    if not query_is_accessory:
+    if not has_accessory_marker(query):
         if has_accessory_marker(title):
             return False
-
-    # --------------------------------------------------------
-    # 2. Бренд
-    # --------------------------------------------------------
 
     if not brand_match(query, title):
         return False
 
-    # --------------------------------------------------------
-    # 3. iPhone
-    # --------------------------------------------------------
-
     if "iphone" in query_normalized:
         if not iphone_models_match(query, title):
             return False
-
-    # --------------------------------------------------------
-    # 4. Pampers
-    # --------------------------------------------------------
 
     if (
         "pampers" in query_normalized
@@ -680,22 +627,12 @@ def is_relevant_result(query: str, item: dict) -> bool:
         if not pampers_match(query, title):
             return False
 
-    # --------------------------------------------------------
-    # 5. Обязательные характеристики
-    # --------------------------------------------------------
-
     if not attribute_lists_match(query, title):
         return False
-
-    # --------------------------------------------------------
-    # 6. Проверка важных слов
-    # --------------------------------------------------------
 
     q_tokens = important_tokens(query)
     t_tokens = important_tokens(title)
 
-    # Удаляем характеристики из token-сравнения.
-    # Они проверяются отдельно выше.
     characteristic_tokens = {
         "gb",
         "tb",
@@ -711,14 +648,10 @@ def is_relevant_result(query: str, item: dict) -> bool:
     q_tokens -= characteristic_tokens
     t_tokens -= characteristic_tokens
 
-    # Для коротких запросов достаточно наличия
-    # основных слов.
     if len(q_tokens) <= 2:
         if not q_tokens.intersection(t_tokens):
             return False
 
-    # Для длинного запроса требуем,
-    # чтобы значительная часть важных слов совпадала.
     else:
         overlap = len(q_tokens.intersection(t_tokens))
         ratio = overlap / len(q_tokens)
@@ -803,10 +736,6 @@ async def message_handler(message: Message):
 
         return
 
-    # --------------------------------------------------------
-    # Оставляем только товары с корректной ценой.
-    # --------------------------------------------------------
-
     results_with_price = []
 
     for item in results:
@@ -825,10 +754,6 @@ async def message_handler(message: Message):
 
         results_with_price.append(item)
 
-    # --------------------------------------------------------
-    # PRODUCT MATCHING
-    # --------------------------------------------------------
-
     filtered_results = [
         item
         for item in results_with_price
@@ -845,20 +770,11 @@ async def message_handler(message: Message):
 
         return
 
-    # --------------------------------------------------------
-    # Сортировка по реальной числовой цене
-    # --------------------------------------------------------
-
     filtered_results.sort(
         key=lambda item: item["numeric_price"]
     )
 
-    # Максимум 10 результатов.
     filtered_results = filtered_results[:10]
-
-    # --------------------------------------------------------
-    # OUTPUT
-    # --------------------------------------------------------
 
     lines = [
         "🦖 <b>ЦЕНОЕД НАШЁЛ!</b>",
@@ -939,13 +855,64 @@ async def message_handler(message: Message):
 
 
 # ============================================================
+# TELEGRAM WEBHOOK
+# ============================================================
+
+@app.post(WEBHOOK_PATH)
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(
+        default=None
+    ),
+):
+    if not WEBHOOK_SECRET:
+        raise HTTPException(
+            status_code=500,
+            detail="WEBHOOK_SECRET is not configured"
+        )
+
+    if (
+        x_telegram_bot_api_secret_token
+        != WEBHOOK_SECRET
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid webhook secret"
+        )
+
+    data = await request.json()
+
+    update = Update.model_validate(
+        data,
+        context={"bot": bot}
+    )
+
+    await dp.feed_update(
+        bot,
+        update
+    )
+
+    return {"ok": True}
+
+
+# ============================================================
 # BOT
 # ============================================================
 
-async def run_bot():
+bot: Bot | None = None
+
+
+async def setup_webhook():
+    global bot
+
     if not TOKEN:
         raise RuntimeError(
             "BOT_TOKEN is not set"
+        )
+
+    if not WEBHOOK_SECRET:
+        raise RuntimeError(
+            "WEBHOOK_SECRET is not set"
         )
 
     bot = Bot(
@@ -955,11 +922,30 @@ async def run_bot():
         )
     )
 
-    try:
-        await dp.start_polling(bot)
+    await bot.set_webhook(
+        url=WEBHOOK_URL,
+        secret_token=WEBHOOK_SECRET,
+        drop_pending_updates=False,
+    )
 
-    finally:
+    print(
+        f"WEBHOOK SET: {WEBHOOK_URL}",
+        flush=True
+    )
+
+
+@app.on_event("startup")
+async def startup_event():
+    await setup_webhook()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global bot
+
+    if bot:
         await bot.session.close()
+        bot = None
 
 
 # ============================================================
@@ -987,12 +973,5 @@ async def run_web():
 # MAIN
 # ============================================================
 
-async def main():
-    await asyncio.gather(
-        run_bot(),
-        run_web()
-    )
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_web())
