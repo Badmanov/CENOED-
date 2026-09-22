@@ -25,7 +25,7 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "0.5"
+        "version": "0.6"
     }
 
 
@@ -48,6 +48,73 @@ def format_price(price):
         return f"{value:,.2f} ₽".replace(",", " ").replace(".", ",")
     except (TypeError, ValueError):
         return str(price)
+
+
+def extract_pampers_size(text: str):
+    """
+    Пытается определить размер Pampers из текста.
+    Например:
+    Pampers Premium Care 5 -> 5
+    Premium Care 1 -> 1
+    1 размер -> 1
+    size 5 -> 5
+    """
+    text = text.lower()
+
+    patterns = [
+        r"\bpampers\s+premium\s+care\s+(\d+)\b",
+        r"\bpremium\s+care\s+(\d+)\b",
+        r"\bпремиум\s*(?:кэр|care)\s*(\d+)\b",
+        r"\bразмер\s*(\d+)\b",
+        r"\b(\d+)\s*размер\b",
+        r"\bsize\s*(\d+)\b",
+        r"\b(\d+)\s*size\b",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+
+        if match:
+            return int(match.group(1))
+
+    return None
+
+
+def is_pampers_query(query: str) -> bool:
+    """Определяет, является ли запрос поиском Pampers."""
+    text = query.lower()
+
+    return (
+        "pampers" in text
+        or "памперс" in text
+        or "подгузник" in text
+    )
+
+
+def is_relevant_result(query: str, item: dict) -> bool:
+    """
+    Проверяет, соответствует ли найденный товар запросу.
+    Для Pampers Premium Care с указанным размером
+    применяем строгую проверку размера.
+    """
+
+    if not is_pampers_query(query):
+        return True
+
+    query_size = extract_pampers_size(query)
+
+    if query_size is None:
+        return True
+
+    title = item.get("title") or ""
+    result_size = extract_pampers_size(title)
+
+    # Если пользователь указал конкретный размер,
+    # результат должен иметь тот же явно определённый размер.
+    if result_size != query_size:
+        return False
+
+    return True
 
 
 @dp.message(CommandStart())
@@ -114,6 +181,7 @@ async def message_handler(message: Message):
         )
         return
 
+    # Оставляем только результаты с ценой.
     results_with_price = [
         item
         for item in results
@@ -121,7 +189,26 @@ async def message_handler(message: Message):
         or item.get("price_text")
     ]
 
-    results_with_price.sort(
+    # Проверяем соответствие товара запросу.
+    filtered_results = [
+        item
+        for item in results_with_price
+        if is_relevant_result(query, item)
+    ]
+
+    # Если строгий фильтр ничего не оставил,
+    # показываем понятное сообщение вместо неправильных товаров.
+    if not filtered_results:
+        await status_message.edit_text(
+            "🦖 <b>Точных совпадений не нашёл.</b>\n\n"
+            f"🔎 Искал:\n«{html.escape(query)}»\n\n"
+            "Попробуй добавить бренд, модель, размер "
+            "или объём товара."
+        )
+        return
+
+    # Сортируем от самой низкой цены.
+    filtered_results.sort(
         key=lambda item: (
             item.get("price")
             if isinstance(item.get("price"), (int, float))
@@ -129,7 +216,8 @@ async def message_handler(message: Message):
         )
     )
 
-    results_with_price = results_with_price[:10]
+    # Показываем максимум 10 результатов.
+    filtered_results = filtered_results[:10]
 
     lines = [
         "🦖 <b>ЦЕНОЕД НАШЁЛ!</b>",
@@ -138,7 +226,7 @@ async def message_handler(message: Message):
         ""
     ]
 
-    for index, item in enumerate(results_with_price, start=1):
+    for index, item in enumerate(filtered_results, start=1):
         title = html.escape(
             item.get("title") or "Товар"
         )
@@ -189,7 +277,7 @@ async def message_handler(message: Message):
 
         lines.append("")
 
-    lowest_price = results_with_price[0].get("price")
+    lowest_price = filtered_results[0].get("price")
 
     if isinstance(lowest_price, (int, float)):
         lines.append(
