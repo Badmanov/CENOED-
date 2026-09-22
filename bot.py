@@ -24,7 +24,6 @@ from search_query import build_search_query
 # ============================================================
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 
 BASE_WEBHOOK_URL = "https://cenoed.onrender.com"
@@ -56,7 +55,7 @@ async def health_check():
     return {
         "status": "ok",
         "bot": "ЦЕНОЕД",
-        "version": "1.0",
+        "version": "1.1",
     }
 
 
@@ -73,7 +72,7 @@ def clean_query(text: str) -> str:
 
 
 # ============================================================
-# PRICE
+# PRICE PARSING
 # ============================================================
 
 def parse_price(value: Any):
@@ -81,12 +80,13 @@ def parse_price(value: Any):
     Преобразует цену из разных форматов
     в число.
 
-    Примеры:
+    Поддерживает:
 
     12 990 ₽
     12,990
     12990
     12 990,50 ₽
+    12.990,50
     """
 
     if value is None:
@@ -112,7 +112,8 @@ def parse_price(value: Any):
         " ",
     )
 
-    # Оставляем цифры, запятую, точку и пробел.
+    # Оставляем только цифры,
+    # запятую, точку и пробел.
     cleaned = re.sub(
         r"[^\d,.\s]",
         "",
@@ -128,8 +129,10 @@ def parse_price(value: Any):
         return None
 
     # Например:
+    #
     # 12.990,50
     # 12,990.50
+    #
     if "," in cleaned and "." in cleaned:
 
         if cleaned.rfind(",") > cleaned.rfind("."):
@@ -281,7 +284,7 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # Запрос пользователя
+    # Оригинальный запрос пользователя
     # --------------------------------------------------------
 
     user_query = clean_query(
@@ -299,7 +302,7 @@ async def message_handler(
 
 
     # --------------------------------------------------------
-    # Строим поисковый запрос
+    # Строим оптимизированный поисковый запрос
     # --------------------------------------------------------
 
     search_query = build_search_query(
@@ -307,11 +310,32 @@ async def message_handler(
     )
 
 
+    # --------------------------------------------------------
+    # ДИАГНОСТИКА
+    #
+    # Эти строки будут видны в Render Logs.
+    # --------------------------------------------------------
+
+    print(
+        f"USER QUERY: {user_query}",
+        flush=True,
+    )
+
+    print(
+        f"SEARCH QUERY: {search_query}",
+        flush=True,
+    )
+
+
     if not search_query:
 
         await message.answer(
-            "🦖 Не удалось понять запрос. "
-            "Попробуй написать название товара подробнее."
+
+            "🦖 Не удалось понять запрос.\n\n"
+
+            "Попробуй написать название "
+            "товара подробнее."
+
         )
 
         return
@@ -437,16 +461,23 @@ async def message_handler(
         try:
 
             relevant = is_relevant_result(
+
                 user_query,
+
                 item,
+
             )
 
         except Exception as e:
 
             print(
+
                 "MATCHING ERROR: "
+
                 f"{type(e).__name__}: {e}",
+
                 flush=True,
+
             )
 
             relevant = False
@@ -515,6 +546,7 @@ async def message_handler(
         f"</b>",
 
         "",
+
     ]
 
 
@@ -529,6 +561,7 @@ async def message_handler(
         title = html.escape(
 
             item.get("title")
+
             or "Товар"
 
         )
@@ -537,6 +570,7 @@ async def message_handler(
         store = html.escape(
 
             item.get("store")
+
             or "Магазин",
 
             quote=True,
@@ -591,7 +625,9 @@ async def message_handler(
         else:
 
             store_line = (
+
                 f"<b>{store}</b>"
+
             )
 
 
@@ -623,7 +659,9 @@ async def message_handler(
         lines.append(
 
             f"{prefix} 🛒 "
+
             f"{store_line} — "
+
             f"💰 <b>{safe_price}</b>\n"
 
             f"   {title}"
@@ -639,8 +677,11 @@ async def message_handler(
     # ========================================================
 
     lowest_price = (
+
         filtered_results[0]
+
         ["numeric_price"]
+
     )
 
 
@@ -857,8 +898,11 @@ async def run_web():
     port = int(
 
         os.getenv(
+
             "PORT",
+
             "10000",
+
         )
 
     )
