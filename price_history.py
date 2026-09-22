@@ -10,43 +10,96 @@ from psycopg2.extras import RealDictCursor
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+# ============================================================
+# NORMALIZATION
+# ============================================================
+
 def normalize_identity(value: Any) -> str:
     text = str(value or "").lower().strip()
-    text = re.sub(r"\s+", " ", text)
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    )
+
     return text
 
 
-def build_product_key(
-    title: str,
+def make_hash(value: str) -> str:
+    return hashlib.sha256(
+        value.encode("utf-8")
+    ).hexdigest()
+
+
+# ============================================================
+# KEYS
+# ============================================================
+
+def build_market_key(
+    product_query: str,
+) -> str:
+    """
+    Один ключ для одного пользовательского запроса.
+
+    Например:
+
+    iPhone 17 Pro 256 GB
+
+    будет одинаковым для:
+
+    Apple Store
+    iStore
+    Distiphone
+    i4you
+    и т.д.
+    """
+
+    normalized = normalize_identity(
+        product_query
+    )
+
+    return make_hash(
+        f"market|{normalized}"
+    )
+
+
+def build_store_key(
     store: str,
     link: str | None,
 ) -> str:
     """
-    Создаёт стабильный идентификатор товара.
+    Ключ конкретного предложения.
 
-    В первую очередь используем ссылку.
-    Если ссылки нет — магазин + название.
+    Если есть ссылка — используем её.
+    Иначе используем магазин.
     """
 
     if link:
+
         raw = (
-            f"link|"
+            "store-link|"
             f"{normalize_identity(link)}"
         )
+
     else:
+
         raw = (
-            f"product|"
-            f"{normalize_identity(store)}|"
-            f"{normalize_identity(title)}"
+            "store|"
+            f"{normalize_identity(store)}"
         )
 
-    return hashlib.sha256(
-        raw.encode("utf-8")
-    ).hexdigest()
+    return make_hash(raw)
 
+
+# ============================================================
+# DATABASE
+# ============================================================
 
 def get_connection():
+
     if not DATABASE_URL:
+
         raise RuntimeError(
             "DATABASE_URL is not configured"
         )
@@ -59,15 +112,22 @@ def get_connection():
 
 def init_database() -> None:
     """
-    Создаёт таблицу истории цен,
-    если её ещё нет.
+    Создаёт/обновляет структуру базы.
+
+    Старые записи не удаляются.
     """
 
     connection = get_connection()
 
     try:
+
         with connection:
+
             with connection.cursor() as cursor:
+
+                # ------------------------------------------------
+                # Existing table
+                # ------------------------------------------------
 
                 cursor.execute(
                     """
@@ -84,11 +144,67 @@ def init_database() -> None:
                     """
                 )
 
+
+                # ------------------------------------------------
+                # New columns
+                # ------------------------------------------------
+
+                cursor.execute(
+                    """
+                    ALTER TABLE price_history
+                    ADD COLUMN IF NOT EXISTS
+                    market_key TEXT;
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    ALTER TABLE price_history
+                    ADD COLUMN IF NOT EXISTS
+                    store_key TEXT;
+                    """
+                )
+
+
+                # ------------------------------------------------
+                # Compatibility
+                # ------------------------------------------------
+
+                cursor.execute(
+                    """
+                    UPDATE price_history
+                    SET market_key = product_key
+                    WHERE market_key IS NULL;
+                    """
+                )
+
+
+                cursor.execute(
+                    """
+                    UPDATE price_history
+                    SET store_key = product_key
+                    WHERE store_key IS NULL;
+                    """
+                )
+
+
+                # ------------------------------------------------
+                # Indexes
+                # ------------------------------------------------
+
                 cursor.execute(
                     """
                     CREATE INDEX IF NOT EXISTS
-                    idx_price_history_product_key
-                    ON price_history(product_key);
+                    idx_price_history_market_key
+                    ON price_history(market_key);
+                    """
+                )
+
+                cursor.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_price_history_store_key
+                    ON price_history(store_key);
                     """
                 )
 
@@ -101,29 +217,44 @@ def init_database() -> None:
                 )
 
     finally:
+
         connection.close()
 
 
-def save_price_and_get_previous(
+# ============================================================
+# SAVE + HISTORY
+# ============================================================
+
+def save_price_and_get_history(
+    product_query: str,
     title: str,
     store: str,
     link: str | None,
     price: float,
 ) -> dict[str, Any]:
 
-    product_key = build_product_key(
-        title=title,
-        store=store,
-        link=link,
+    market_key = build_market_key(
+        product_query
+    )
+
+    store_key = build_store_key(
+        store,
+        link,
     )
 
     connection = get_connection()
 
     try:
+
         with connection:
+
             with connection.cursor(
                 cursor_factory=RealDictCursor
             ) as cursor:
+
+                # =================================================
+                # STORE HISTORY
+                # =================================================
 
                 cursor.execute(
                     """
@@ -131,19 +262,85 @@ def save_price_and_get_previous(
                         price,
                         observed_at
                     FROM price_history
-                    WHERE product_key = %s
+                    WHERE store_key = %s
                     ORDER BY observed_at DESC
                     LIMIT 1;
                     """,
-                    (product_key,),
+                    (
+                        store_key,
+                    ),
                 )
 
-                previous = cursor.fetchone()
+                store_previous = (
+                    cursor.fetchone()
+                )
+
+
+                # =================================================
+                # MARKET HISTORY
+                # =================================================
+
+                cursor.execute(
+                    """
+                    SELECT
+                        MIN(price) AS min_price,
+                        MAX(price) AS max_price,
+                        COUNT(*) AS observations
+                    FROM price_history
+                    WHERE market_key = %s;
+                    """,
+                    (
+                        market_key,
+                    ),
+                )
+
+                market_stats = (
+                    cursor.fetchone()
+                )
+
+
+                previous_market_min = (
+                    float(
+                        market_stats["min_price"]
+                    )
+                    if (
+                        market_stats
+                        and market_stats["min_price"]
+                        is not None
+                    )
+                    else None
+                )
+
+
+                previous_market_max = (
+                    float(
+                        market_stats["max_price"]
+                    )
+                    if (
+                        market_stats
+                        and market_stats["max_price"]
+                        is not None
+                    )
+                    else None
+                )
+
+
+                observations = int(
+                    market_stats["observations"]
+                    or 0
+                )
+
+
+                # =================================================
+                # INSERT CURRENT OBSERVATION
+                # =================================================
 
                 cursor.execute(
                     """
                     INSERT INTO price_history (
                         product_key,
+                        market_key,
+                        store_key,
                         title,
                         store,
                         link,
@@ -154,11 +351,15 @@ def save_price_and_get_previous(
                         %s,
                         %s,
                         %s,
+                        %s,
+                        %s,
                         %s
                     );
                     """,
                     (
-                        product_key,
+                        market_key,
+                        market_key,
+                        store_key,
                         title,
                         store,
                         link,
@@ -166,22 +367,65 @@ def save_price_and_get_previous(
                     ),
                 )
 
+
+                # =================================================
+                # RETURN HISTORY
+                # =================================================
+
                 return {
-                    "previous_price": (
-                        float(previous["price"])
-                        if previous
+
+                    "market_key":
+                        market_key,
+
+                    "store_key":
+                        store_key,
+
+                    "store_previous_price": (
+
+                        float(
+                            store_previous["price"]
+                        )
+
+                        if store_previous
+
                         else None
+
                     ),
-                    "previous_observed_at": (
-                        previous["observed_at"]
-                        if previous
+
+                    "store_previous_observed_at": (
+
+                        store_previous[
+                            "observed_at"
+                        ]
+
+                        if store_previous
+
                         else None
+
                     ),
+
+                    "market_min_price": (
+                        previous_market_min
+                    ),
+
+                    "market_max_price": (
+                        previous_market_max
+                    ),
+
+                    "market_observations": (
+                        observations
+                    ),
+
                 }
 
     finally:
+
         connection.close()
 
+
+# ============================================================
+# PRICE CHANGE
+# ============================================================
 
 def calculate_price_change(
     current_price: float,
@@ -200,5 +444,26 @@ def calculate_price_change(
             - previous_price
         )
         / previous_price
+        * 100
+    )
+
+
+def calculate_market_difference(
+    current_price: float,
+    previous_min_price: float | None,
+) -> float | None:
+
+    if previous_min_price is None:
+        return None
+
+    if previous_min_price <= 0:
+        return None
+
+    return (
+        (
+            current_price
+            - previous_min_price
+        )
+        / previous_min_price
         * 100
     )
