@@ -7,7 +7,7 @@ import re
 
 def normalize_text(text: str) -> str:
     """
-    Приводит текст к нормальному виду.
+    Приводит текст к единому виду.
     """
 
     text = str(text or "").lower()
@@ -67,7 +67,6 @@ def normalize_text(text: str) -> str:
         text,
     )
 
-    # Убираем лишнюю пунктуацию.
     text = re.sub(
         r"[^\w\s.+&/-]",
         " ",
@@ -175,11 +174,6 @@ def has_accessory_marker(
 def extract_storage(
     text: str,
 ):
-    """
-    256 GB -> 256
-    512 GB -> 512
-    1 TB -> 1024
-    """
 
     normalized = normalize_text(
         text
@@ -469,15 +463,13 @@ def tokens_without_attributes(
 
         token = tokens[index]
 
-        # --------------------------------------------
-        # Число + единица измерения
+        # ----------------------------------------------------
+        # Число + характеристика
         #
         # 256 GB
         # 1 KG
         # 500 ML
-        #
-        # Для идентичности пропускаем.
-        # --------------------------------------------
+        # ----------------------------------------------------
 
         if re.fullmatch(
             r"\d+(?:[.,]\d+)?",
@@ -505,7 +497,7 @@ def tokens_without_attributes(
                 continue
 
             # Обычное число —
-            # это часть модели.
+            # часть модели.
             result.append(
                 token
             )
@@ -513,10 +505,6 @@ def tokens_without_attributes(
             index += 1
 
             continue
-
-        # --------------------------------------------
-        # Единица измерения
-        # --------------------------------------------
 
         if token in {
             "gb",
@@ -534,19 +522,11 @@ def tokens_without_attributes(
 
             continue
 
-        # --------------------------------------------
-        # Стоп-слова
-        # --------------------------------------------
-
         if token in STOP_WORDS:
 
             index += 1
 
             continue
-
-        # --------------------------------------------
-        # Слова аксессуара
-        # --------------------------------------------
 
         if (
             accessory_mode
@@ -569,56 +549,188 @@ def tokens_without_attributes(
 
 
 # ============================================================
-# MODEL VARIANT
+# DEVICE MODEL EXTRACTION
 # ============================================================
 
-def get_variant(
+DEVICE_FAMILIES = {
+    "iphone",
+    "ipad",
+
+    "galaxy",
+    "samsung",
+
+    "pixel",
+
+    "redmi",
+    "poco",
+
+    "xiaomi",
+
+    "oneplus",
+
+    "honor",
+
+    "huawei",
+
+    "oppo",
+
+    "realme",
+}
+
+
+DEVICE_VARIANTS = {
+    "pro",
+    "pro max",
+    "plus",
+    "ultra",
+    "mini",
+    "air",
+    "lite",
+    "fe",
+    "max",
+    "fold",
+    "flip",
+}
+
+
+def extract_device_signature(
     text: str,
 ):
     """
-    Возвращает модификацию модели.
+    Извлекает именно модель устройства.
 
-    Pro Max
-    Pro
-    Plus
-    Ultra
-    Mini
-    Air
-    и т.д.
+    Ключевой момент:
+
+    iPhone 17 Pro Case
+    ->
+    iPhone / 17 / Pro
+
+    iPhone 17 Case CamShield Pro
+    ->
+    iPhone / 17 / None
+
+    Поэтому Pro в названии самого чехла
+    не будет принят за Pro телефона.
     """
 
     normalized = normalize_text(
         text
     )
 
-    if re.search(
-        r"\bpro\s+max\b",
-        normalized,
-    ):
+    tokens = normalized.split()
 
-        return "pro max"
+    for index, token in enumerate(tokens):
 
-    variants = (
-        "pro",
-        "plus",
-        "ultra",
-        "mini",
-        "air",
-        "lite",
-        "fe",
-        "max",
-        "fold",
-        "flip",
-    )
+        if token not in DEVICE_FAMILIES:
 
-    for variant in variants:
+            continue
 
-        if re.search(
-            rf"\b{re.escape(variant)}\b",
-            normalized,
+        # ----------------------------------------------------
+        # Ищем номер модели сразу после семейства.
+        # ----------------------------------------------------
+
+        model_number = None
+        model_index = None
+
+        for offset in range(
+            1,
+            4,
         ):
 
-            return variant
+            position = index + offset
+
+            if position >= len(tokens):
+                break
+
+            candidate = tokens[position]
+
+            # Например:
+            # iPhone 17
+            # Galaxy S25
+            # Pixel 9
+
+            if re.fullmatch(
+                r"[a-z]?\d+[a-z]?",
+                candidate,
+            ):
+
+                model_number = candidate
+                model_index = position
+
+                break
+
+        if model_number is None:
+
+            # Для моделей вроде:
+            # iPhone SE
+            # Galaxy Fold
+
+            continue
+
+        # ----------------------------------------------------
+        # Вариант должен идти НЕПОСРЕДСТВЕННО
+        # после номера модели.
+        #
+        # iPhone 17 Pro
+        #             ^
+        #
+        # Но:
+        #
+        # iPhone 17 Case CamShield Pro
+        #                              ^
+        #
+        # этот Pro уже не относится к телефону.
+        # ----------------------------------------------------
+
+        variant = None
+
+        if (
+            model_index + 2
+            < len(tokens)
+        ):
+
+            first = tokens[
+                model_index + 1
+            ]
+
+            second = tokens[
+                model_index + 2
+            ]
+
+            if (
+                first == "pro"
+                and second == "max"
+            ):
+
+                variant = "pro max"
+
+            elif first in DEVICE_VARIANTS:
+
+                variant = first
+
+        if variant is None:
+
+            if (
+                model_index + 1
+                < len(tokens)
+            ):
+
+                next_token = tokens[
+                    model_index + 1
+                ]
+
+                if (
+                    next_token
+                    in DEVICE_VARIANTS
+                ):
+
+                    variant = next_token
+
+        return (
+            token,
+            model_number,
+            variant,
+        )
 
     return None
 
@@ -652,18 +764,7 @@ def model_identity_matches(
         return False
 
     # --------------------------------------------------------
-    # Все ключевые слова модели должны присутствовать.
-    #
-    # iPhone 17 Pro
-    #
-    # должно найти:
-    #
-    # iPhone 17 Pro Case
-    #
-    # но не:
-    #
-    # iPhone 16 Pro Case
-    # iPhone 17 Pro Max Case
+    # Все основные элементы модели должны присутствовать.
     # --------------------------------------------------------
 
     if not query_tokens.issubset(
@@ -672,21 +773,128 @@ def model_identity_matches(
 
         return False
 
-    # --------------------------------------------------------
-    # Отдельно проверяем вариант.
-    # --------------------------------------------------------
+    # ========================================================
+    # ОБЫЧНЫЙ ТОВАР
+    # ========================================================
 
-    query_variant = get_variant(
-        query
+    if not accessory_mode:
+
+        query_signature = (
+            extract_device_signature(
+                query
+            )
+        )
+
+        title_signature = (
+            extract_device_signature(
+                title
+            )
+        )
+
+        if query_signature:
+
+            if not title_signature:
+
+                return False
+
+            if (
+                query_signature[0]
+                != title_signature[0]
+            ):
+
+                return False
+
+            if (
+                query_signature[1]
+                != title_signature[1]
+            ):
+
+                return False
+
+            if (
+                query_signature[2]
+                != title_signature[2]
+            ):
+
+                return False
+
+        return True
+
+    # ========================================================
+    # АКСЕССУАР
+    # ========================================================
+
+    query_signature = (
+        extract_device_signature(
+            query
+        )
     )
 
-    title_variant = get_variant(
-        title
+    title_signature = (
+        extract_device_signature(
+            title
+        )
     )
 
-    if query_variant:
+    # --------------------------------------------------------
+    # Если в запросе есть понятная модель
+    # устройства, название аксессуара тоже
+    # должно содержать эту модель.
+    # --------------------------------------------------------
 
-        if title_variant != query_variant:
+    if query_signature:
+
+        if not title_signature:
+
+            return False
+
+        # ----------------------------------------------------
+        # Семейство устройства
+        # ----------------------------------------------------
+
+        if (
+            query_signature[0]
+            != title_signature[0]
+        ):
+
+            return False
+
+        # ----------------------------------------------------
+        # Поколение / номер
+        # ----------------------------------------------------
+
+        if (
+            query_signature[1]
+            != title_signature[1]
+        ):
+
+            return False
+
+        # ----------------------------------------------------
+        # Вариант устройства
+        #
+        # ВАЖНО:
+        #
+        # iPhone 17 Pro
+        # !=
+        # iPhone 17
+        #
+        # и
+        #
+        # iPhone 17 Pro
+        # !=
+        # iPhone 17 Pro Max
+        # ----------------------------------------------------
+
+        query_variant = (
+            query_signature[2]
+        )
+
+        title_variant = (
+            title_signature[2]
+        )
+
+        if query_variant != title_variant:
 
             return False
 
@@ -703,18 +911,16 @@ def attributes_match(
     accessory_mode: bool,
 ):
 
-    # Для аксессуаров характеристики
-    # самого устройства не проверяем.
-    #
-    # Например:
+    # --------------------------------------------------------
+    # Для аксессуара характеристики самого
+    # устройства игнорируем.
     #
     # iPhone 17 Pro 256 GB чехол
     #
-    # и
+    # совместим с:
     #
-    # чехол iPhone 17 Pro
-    #
-    # считаются совместимыми.
+    # iPhone 17 Pro Case
+    # --------------------------------------------------------
 
     if accessory_mode:
 
@@ -838,7 +1044,10 @@ def attributes_match(
             )
         )
 
-        if title_pampers != query_pampers:
+        if (
+            title_pampers
+            != query_pampers
+        ):
 
             return False
 
@@ -875,8 +1084,10 @@ def is_relevant_result(
     # ACCESSORY MODE
     # ========================================================
 
-    accessory_mode = has_accessory_marker(
-        normalized_query
+    accessory_mode = (
+        has_accessory_marker(
+            normalized_query
+        )
     )
 
     title_is_accessory = (
@@ -887,7 +1098,7 @@ def is_relevant_result(
 
     # --------------------------------------------------------
     # Если ищем аксессуар —
-    # результат обязан быть аксессуаром.
+    # результат должен быть аксессуаром.
     # --------------------------------------------------------
 
     if accessory_mode:
