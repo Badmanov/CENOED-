@@ -19,8 +19,14 @@ app = FastAPI()
 async def health_check():
     return {
         "status": "ok",
-        "bot": "ЦЕНОЕД"
+        "bot": "ЦЕНОЕД",
+        "version": "0.2"
     }
+
+
+def clean_query(text: str) -> str:
+    """Очищаем запрос пользователя."""
+    return re.sub(r"\s+", " ", text.strip())
 
 
 @dp.message(CommandStart())
@@ -29,48 +35,38 @@ async def start_handler(message: Message):
         "🦖 ЦЕНОЕД на связи!\n\n"
         "Я ищу товары, сравниваю цены и помогаю находить "
         "реальные скидки.\n\n"
-        "🔎 Просто отправь мне название товара.\n\n"
+        "🔎 Просто отправь название товара.\n\n"
         "Например:\n"
         "• Pampers Premium Care 5\n"
         "• iPhone 17 Pro 256 GB\n"
         "• Coca-Cola 1.5 л\n"
-        "• кофе Lavazza 1 кг\n\n"
+        "• Lavazza 1 кг\n\n"
         "🦖 Отправляй товар — отправлю Ценоеда на охоту!"
     )
-
-
-def clean_product_query(text: str) -> str:
-    """Подготавливает текст пользователя для поиска."""
-    query = text.strip()
-
-    # Убираем лишние пробелы
-    query = re.sub(r"\s+", " ", query)
-
-    return query
 
 
 @dp.message()
 async def message_handler(message: Message):
     if not message.text:
         await message.answer(
-            "🦖 Пока я умею искать товары по названию.\n"
-            "Отправь мне название товара текстом."
+            "🦖 Отправь мне название товара текстом."
         )
         return
 
-    query = clean_product_query(message.text)
+    query = clean_query(message.text)
 
     if len(query) < 2:
         await message.answer(
-            "🦖 Напиши название товара чуть подробнее."
+            "🦖 Напиши название товара подробнее."
         )
         return
 
     await message.answer(
-        f"🦖 ЦЕНОЕД ПРИНЯЛ ЗАПРОС!\n\n"
-        f"🔎 Ищу:\n"
-        f"«{query}»\n\n"
-        f"⏳ Отправляю Ценоеда на охоту за ценами..."
+        "🦖 ЦЕНОЕД ПРИНЯЛ ЗАПРОС!\n\n"
+        f"🔎 Товар:\n«{query}»\n\n"
+        "⏳ Подготавливаю поиск цен...\n\n"
+        "💰 Следующий этап — подключение реальных "
+        "источников цен."
     )
 
 
