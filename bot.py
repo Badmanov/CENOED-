@@ -977,7 +977,7 @@ async def message_handler(
                 f"{format_price(market_max)}"
             ),
             (
-                "Наблюдений: "
+                "Точек истории: "
                 f"{market_history['observations']}"
             ),
         ])
