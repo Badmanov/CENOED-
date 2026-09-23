@@ -9,7 +9,10 @@ SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
 SCRAPEDO_URL = "https://api.scrape.do/plugin/google/shopping"
 
 
-def search_google_shopping(query: str) -> list[dict[str, Any]]:
+def search_google_shopping(
+    query: str,
+    location: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Ищет товар в Google Shopping через Scrape.do
     с ориентацией на российский рынок.
@@ -27,6 +30,9 @@ def search_google_shopping(query: str) -> list[dict[str, Any]]:
         "device": "desktop",
         "sort_by": 0,
     }
+
+    if location:
+        params["location"] = location
 
     response = requests.get(
         SCRAPEDO_URL,
