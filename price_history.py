@@ -351,6 +351,23 @@ def save_price_and_get_history(
                     SELECT
                         MIN(price) AS min_price,
                         MAX(price) AS max_price,
+                        MIN(price) FILTER (
+                            WHERE observed_at >=
+                            NOW() - INTERVAL '7 days'
+                        ) AS min_price_7d,
+                        MIN(price) FILTER (
+                            WHERE observed_at >=
+                            NOW() - INTERVAL '30 days'
+                        ) AS min_price_30d,
+                        (
+                            ARRAY_AGG(
+                                observed_at
+                                ORDER BY
+                                    price ASC,
+                                    observed_at ASC
+                            )
+                        )[1] AS min_price_observed_at,
+                        MAX(observed_at) AS last_observed_at,
                         COUNT(*) AS observations
                     FROM price_history
                     WHERE market_key = %s;
@@ -388,6 +405,66 @@ def save_price_and_get_history(
                         is not None
                     )
                     else None
+                )
+
+
+                previous_market_min_7d = (
+
+                    float(
+                        market_stats["min_price_7d"]
+                    )
+
+                    if (
+                        market_stats
+                        and market_stats["min_price_7d"]
+                        is not None
+                    )
+
+                    else None
+
+                )
+
+
+                previous_market_min_30d = (
+
+                    float(
+                        market_stats["min_price_30d"]
+                    )
+
+                    if (
+                        market_stats
+                        and market_stats["min_price_30d"]
+                        is not None
+                    )
+
+                    else None
+
+                )
+
+
+                market_min_observed_at = (
+
+                    market_stats[
+                        "min_price_observed_at"
+                    ]
+
+                    if market_stats
+
+                    else None
+
+                )
+
+
+                market_last_observed_at = (
+
+                    market_stats[
+                        "last_observed_at"
+                    ]
+
+                    if market_stats
+
+                    else None
+
                 )
 
 
@@ -474,6 +551,22 @@ def save_price_and_get_history(
 
                     "market_max_price": (
                         previous_market_max
+                    ),
+
+                    "market_min_price_7d": (
+                        previous_market_min_7d
+                    ),
+
+                    "market_min_price_30d": (
+                        previous_market_min_30d
+                    ),
+
+                    "market_min_observed_at": (
+                        market_min_observed_at
+                    ),
+
+                    "market_last_observed_at": (
+                        market_last_observed_at
                     ),
 
                     "market_observations": (
