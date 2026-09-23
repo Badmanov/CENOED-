@@ -19,7 +19,7 @@ from product_matching import is_relevant_result
 from search_query import build_search_query
 from price_history import (
     init_database,
-    save_price_and_get_previous,
+    save_price_and_get_history,
     calculate_price_change,
 )
 
@@ -622,7 +622,9 @@ async def message_handler(
             history = (
                 await asyncio.to_thread(
 
-                    save_price_and_get_previous,
+                    save_price_and_get_history,
+
+                    user_query,
 
                     title,
 
@@ -637,7 +639,7 @@ async def message_handler(
 
             previous_price = (
                 history.get(
-                    "previous_price"
+                    "store_previous_price"
                 )
             )
 
