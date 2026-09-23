@@ -3,6 +3,7 @@ import html
 import os
 import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import uvicorn
 
@@ -75,6 +76,32 @@ def clean_query(text: str) -> str:
         r"\s+",
         " ",
         text.strip(),
+    )
+
+
+def format_history_datetime(
+    value: Any,
+) -> str | None:
+
+    if value is None:
+        return None
+
+    try:
+
+        localized = value.astimezone(
+            ZoneInfo("Europe/Moscow")
+        )
+
+    except (
+        AttributeError,
+        TypeError,
+        ValueError,
+    ):
+
+        return None
+
+    return localized.strftime(
+        "%d.%m.%Y %H:%M"
     )
 
 
@@ -667,6 +694,18 @@ async def message_handler(
                     "max_price": history.get(
                         "market_max_price"
                     ),
+                    "min_price_7d": history.get(
+                        "market_min_price_7d"
+                    ),
+                    "min_price_30d": history.get(
+                        "market_min_price_30d"
+                    ),
+                    "min_observed_at": history.get(
+                        "market_min_observed_at"
+                    ),
+                    "last_observed_at": history.get(
+                        "market_last_observed_at"
+                    ),
                     "observations": history.get(
                         "market_observations",
                         0,
@@ -965,13 +1004,66 @@ async def message_handler(
             )
         )
 
+        min_price_7d = (
+            market_history.get(
+                "min_price_7d"
+            )
+        )
+
+        min_price_30d = (
+            market_history.get(
+                "min_price_30d"
+            )
+        )
+
+        min_observed_at = (
+            format_history_datetime(
+                market_history.get(
+                    "min_observed_at"
+                )
+            )
+        )
+
+        last_observed_at = (
+            format_history_datetime(
+                market_history.get(
+                    "last_observed_at"
+                )
+            )
+        )
+
         lines.extend([
             "",
             "📊 <b>Сохранённые наблюдения рынка</b>",
-            (
-                "Минимум среди наблюдений: "
-                f"{format_price(market_min)}"
-            ),
+        ])
+
+        if min_price_7d is not None:
+
+            lines.append(
+                "Минимум за 7 дней: "
+                f"{format_price(min_price_7d)}"
+            )
+
+        if min_price_30d is not None:
+
+            lines.append(
+                "Минимум за 30 дней: "
+                f"{format_price(min_price_30d)}"
+            )
+
+        market_min_line = (
+            "Минимум среди всех наблюдений: "
+            f"{format_price(market_min)}"
+        )
+
+        if min_observed_at:
+
+            market_min_line += (
+                f" — {min_observed_at}"
+            )
+
+        lines.extend([
+            market_min_line,
             (
                 "Максимум среди наблюдений: "
                 f"{format_price(market_max)}"
@@ -981,6 +1073,13 @@ async def message_handler(
                 f"{market_history['observations']}"
             ),
         ])
+
+        if last_observed_at:
+
+            lines.append(
+                "Последнее изменение/новое предложение: "
+                f"{last_observed_at}"
+            )
 
         if market_difference is not None:
 
