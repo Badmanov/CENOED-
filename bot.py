@@ -35,6 +35,9 @@ from subscriptions import (
     deactivate_subscription,
     init_subscriptions,
     list_subscriptions,
+    get_due_subscriptions,
+    record_price_check,
+    should_notify,
 )
 
 
@@ -1199,6 +1202,203 @@ async def message_handler(
         reply_markup=reply_markup,
 
     )
+
+
+# ============================================================
+# AUTOMATIC SUBSCRIPTION CHECKS
+# ============================================================
+
+def find_lowest_subscription_offer(
+    product_query: str,
+    prepared_query: str,
+) -> dict[str, Any] | None:
+    results = search_google_shopping(
+        prepared_query
+    )
+
+    matching = []
+
+    for item in results or []:
+        raw_price = (
+            item.get("price")
+            if item.get("price") is not None
+            else item.get("price_text")
+        )
+        numeric_price = parse_price(
+            raw_price
+        )
+
+        if numeric_price is None:
+            continue
+
+        try:
+            relevant = is_relevant_result(
+                product_query,
+                item,
+            )
+        except Exception:
+            relevant = False
+
+        if not relevant:
+            continue
+
+        item = dict(item)
+        item["numeric_price"] = numeric_price
+        matching.append(item)
+
+    if not matching:
+        return None
+
+    return min(
+        matching,
+        key=lambda item:
+        item["numeric_price"],
+    )
+
+
+async def check_price_subscriptions() -> dict[str, int]:
+    if bot is None:
+        return {
+            "checked": 0,
+            "notified": 0,
+            "failed": 0,
+        }
+
+    subscriptions = await asyncio.to_thread(
+        get_due_subscriptions,
+        10,
+    )
+
+    checked = 0
+    notified = 0
+    failed = 0
+
+    for subscription in subscriptions:
+        subscription_id = subscription["id"]
+
+        try:
+            offer = await asyncio.to_thread(
+                find_lowest_subscription_offer,
+                subscription["product_query"],
+                subscription["search_query"],
+            )
+
+            if offer is None:
+                await asyncio.to_thread(
+                    record_price_check,
+                    subscription_id,
+                    None,
+                )
+                checked += 1
+                continue
+
+            current_price = float(
+                offer["numeric_price"]
+            )
+            baseline_price = float(
+                subscription["baseline_price"]
+            )
+            notify = (
+                current_price < baseline_price
+                and should_notify(
+                    current_price,
+                    subscription["last_seen_price"],
+                    subscription["last_notified_price"],
+                )
+            )
+
+            if notify:
+                previous_price = float(
+                    subscription["last_seen_price"]
+                )
+                discount = (
+                    (previous_price - current_price)
+                    / previous_price
+                    * 100
+                )
+
+                store = html.escape(
+                    offer.get("store")
+                    or "Магазин"
+                )
+                title = html.escape(
+                    offer.get("title")
+                    or subscription["product_query"]
+                )
+                link = offer.get("link")
+                link_line = ""
+
+                if link:
+                    safe_link = html.escape(
+                        str(link),
+                        quote=True,
+                    )
+                    link_line = (
+                        f'\n<a href="{safe_link}">'
+                        "Открыть предложение"
+                        "</a>"
+                    )
+
+                await bot.send_message(
+                    chat_id=subscription["chat_id"],
+                    text=(
+                        "🔔 <b>Цена снизилась!</b>\n\n"
+                        f"{title}\n"
+                        f"Магазин: <b>{store}</b>\n"
+                        f"Новая цена: "
+                        f"<b>{format_price(current_price)}</b>\n"
+                        f"Предыдущая цена: "
+                        f"{format_price(previous_price)}\n"
+                        f"Снижение: <b>{discount:.1f}%</b>"
+                        f"{link_line}"
+                    ),
+                    disable_web_page_preview=True,
+                )
+                notified += 1
+
+            await asyncio.to_thread(
+                record_price_check,
+                subscription_id,
+                current_price,
+                notify,
+            )
+            checked += 1
+
+        except Exception as e:
+            failed += 1
+            print(
+                f"SUBSCRIPTION CHECK ERROR "
+                f"{subscription_id}: "
+                f"{type(e).__name__}: {e}",
+                flush=True,
+            )
+            try:
+                await asyncio.to_thread(
+                    record_price_check,
+                    subscription_id,
+                    None,
+                )
+            except Exception:
+                pass
+
+    return {
+        "checked": checked,
+        "notified": notified,
+        "failed": failed,
+    }
+
+
+@app.get("/tasks/check-prices")
+async def scheduled_price_check():
+    result = await check_price_subscriptions()
+    print(
+        f"SUBSCRIPTION CHECK: {result}",
+        flush=True,
+    )
+    return {
+        "status": "ok",
+        **result,
+    }
 
 
 # ============================================================
