@@ -36,7 +36,9 @@ from subscriptions import (
     init_subscriptions,
     list_subscriptions,
     get_due_subscriptions,
+    get_user_city,
     record_price_check,
+    set_user_city,
     should_notify,
 )
 
@@ -364,9 +366,78 @@ async def start_handler(
         "• Lavazza 1 кг\n"
         "• Чехол iPhone 17 Pro\n\n"
 
+        "📍 Город поиска: команда /city\n"
+        "🔔 Подписки: команда /subscriptions\n\n"
         "🦖 Отправляй товар — "
         "отправлю Ценоеда на охоту!"
 
+    )
+
+
+# ============================================================
+# USER CITY
+# ============================================================
+
+@dp.message(Command("city"))
+async def city_handler(message: Message):
+    if not message.from_user:
+        return
+
+    raw_city = ""
+
+    if message.text:
+        parts = message.text.split(
+            maxsplit=1
+        )
+        if len(parts) > 1:
+            raw_city = parts[1].strip()
+
+    if not raw_city:
+        try:
+            current_city = await asyncio.to_thread(
+                get_user_city,
+                message.from_user.id,
+            )
+        except Exception:
+            current_city = "Москва, Россия"
+
+        await message.answer(
+            "📍 <b>Город поиска</b>\n\n"
+            f"Сейчас: {html.escape(current_city)}\n\n"
+            "Чтобы изменить, отправь, например:\n"
+            "<code>/city Санкт-Петербург</code>"
+        )
+        return
+
+    if "," not in raw_city:
+        raw_city = f"{raw_city}, Россия"
+
+    try:
+        city = await asyncio.to_thread(
+            set_user_city,
+            message.from_user.id,
+            raw_city,
+        )
+    except (ValueError, TypeError):
+        await message.answer(
+            "📍 Не удалось сохранить город. "
+            "Напиши название города после /city."
+        )
+        return
+    except Exception as e:
+        print(
+            f"CITY SAVE ERROR: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        await message.answer(
+            "📍 Не удалось сохранить город. Попробуй позже."
+        )
+        return
+
+    await message.answer(
+        "📍 <b>Город сохранён</b>\n\n"
+        f"{html.escape(city)}\n"
+        "Новые поиски и подписки будут учитывать этот город."
     )
 
 
@@ -540,6 +611,23 @@ async def message_handler(
         message.text
     )
 
+    if message.from_user:
+
+        try:
+
+            user_city = await asyncio.to_thread(
+                get_user_city,
+                message.from_user.id,
+            )
+
+        except Exception:
+
+            user_city = "Москва, Россия"
+
+    else:
+
+        user_city = "Москва, Россия"
+
 
     if len(user_query) < 2:
 
@@ -606,6 +694,8 @@ async def message_handler(
             search_google_shopping,
 
             search_query,
+
+            user_city,
 
         )
 
@@ -900,6 +990,8 @@ async def message_handler(
         f"{html.escape(user_query)}"
         f"</b>",
 
+        f"📍 {html.escape(user_city)}",
+
         "",
 
     ]
@@ -1140,6 +1232,8 @@ async def message_handler(
 
                 lowest_price,
 
+                user_city,
+
             )
 
         except Exception as e:
@@ -1211,9 +1305,11 @@ async def message_handler(
 def find_lowest_subscription_offer(
     product_query: str,
     prepared_query: str,
+    city: str,
 ) -> dict[str, Any] | None:
     results = search_google_shopping(
-        prepared_query
+        prepared_query,
+        city,
     )
 
     matching = []
@@ -1281,6 +1377,8 @@ async def check_price_subscriptions() -> dict[str, int]:
                 find_lowest_subscription_offer,
                 subscription["product_query"],
                 subscription["search_query"],
+                subscription.get("city")
+                or "Москва, Россия",
             )
 
             if offer is None:
