@@ -73,11 +73,18 @@ def normalize_store_domain(
     if not link:
         return ""
 
+    raw_link = str(link).strip()
+
     try:
+        parsed = urlparse(raw_link)
+
+        if not parsed.hostname and "://" not in raw_link:
+            parsed = urlparse(f"//{raw_link}")
+
         hostname = (
-            urlparse(str(link).strip()).hostname
+            parsed.hostname
             or ""
-        ).lower()
+        ).lower().rstrip(".")
     except (TypeError, ValueError):
         return ""
 
@@ -86,8 +93,9 @@ def normalize_store_domain(
 
     # Ссылки-посредники Google не идентифицируют продавца.
     if (
-        hostname == "google.com"
+        hostname in {"google.com", "google.ru"}
         or hostname.endswith(".google.com")
+        or hostname.endswith(".google.ru")
     ):
         return ""
 
@@ -101,10 +109,6 @@ def build_store_key(
 ) -> str:
     """Стабильный ключ магазина внутри истории конкретного товара."""
 
-    market_key = build_market_key(
-        product_query
-    )
-
     store_identity = (
         normalize_store_domain(link)
         or normalize_identity(store)
@@ -112,7 +116,7 @@ def build_store_key(
     )
 
     return make_hash(
-        f"store|{market_key}|{store_identity}"
+        f"store|{store_identity}"
     )
 
 
@@ -314,29 +318,6 @@ def save_price_and_get_history(
                     cursor.fetchone()
                 )
 
-                store_previous_price = (
-
-                    float(
-                        store_previous["price"]
-                    )
-
-                    if store_previous
-
-                    else None
-
-                )
-
-                should_save_observation = (
-                    store_previous_price is None
-                    or round(
-                        store_previous_price,
-                        2,
-                    ) != round(
-                        float(price),
-                        2,
-                    )
-                )
-
 
                 # =================================================
                 # MARKET HISTORY
@@ -397,39 +378,37 @@ def save_price_and_get_history(
                 # INSERT CURRENT OBSERVATION
                 # =================================================
 
-                if should_save_observation:
-
-                    cursor.execute(
-                        """
-                        INSERT INTO price_history (
-                            product_key,
-                            market_key,
-                            store_key,
-                            title,
-                            store,
-                            link,
-                            price
-                        )
-                        VALUES (
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s,
-                            %s
-                        );
-                        """,
-                        (
-                            market_key,
-                            market_key,
-                            store_key,
-                            title,
-                            store,
-                            link,
-                            price,
-                        ),
+                cursor.execute(
+                    """
+                    INSERT INTO price_history (
+                        product_key,
+                        market_key,
+                        store_key,
+                        title,
+                        store,
+                        link,
+                        price
                     )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s
+                    );
+                    """,
+                    (
+                        market_key,
+                        market_key,
+                        store_key,
+                        title,
+                        store,
+                        link,
+                        price,
+                    ),
+                )
 
 
                 # =================================================
@@ -445,11 +424,15 @@ def save_price_and_get_history(
                         store_key,
 
                     "store_previous_price": (
-                        store_previous_price
-                    ),
 
-                    "observation_saved": (
-                        should_save_observation
+                        float(
+                            store_previous["price"]
+                        )
+
+                        if store_previous
+
+                        else None
+
                     ),
 
                     "store_previous_observed_at": (
