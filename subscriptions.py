@@ -29,6 +29,7 @@ def init_subscriptions() -> None:
                         chat_id BIGINT NOT NULL,
                         product_query TEXT NOT NULL,
                         search_query TEXT NOT NULL,
+                        city TEXT NOT NULL DEFAULT 'Москва, Россия',
                         baseline_price NUMERIC(14, 2) NOT NULL,
                         last_seen_price NUMERIC(14, 2) NOT NULL,
                         last_notified_price NUMERIC(14, 2),
@@ -56,6 +57,7 @@ def init_subscriptions() -> None:
                         product_query TEXT NOT NULL,
                         search_query TEXT NOT NULL,
                         current_price NUMERIC(14, 2) NOT NULL,
+                        city TEXT NOT NULL DEFAULT 'Москва, Россия',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     );
                     """
@@ -65,6 +67,29 @@ def init_subscriptions() -> None:
                     CREATE INDEX IF NOT EXISTS
                     idx_subscription_candidates_created_at
                     ON subscription_candidates(created_at);
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE price_subscriptions
+                    ADD COLUMN IF NOT EXISTS
+                    city TEXT NOT NULL DEFAULT 'Москва, Россия';
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE subscription_candidates
+                    ADD COLUMN IF NOT EXISTS
+                    city TEXT NOT NULL DEFAULT 'Москва, Россия';
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_profiles (
+                        telegram_user_id BIGINT PRIMARY KEY,
+                        city TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
                     """
                 )
     finally:
@@ -77,6 +102,7 @@ def create_watch_candidate(
     product_query: str,
     search_query: str,
     current_price: float,
+    city: str,
 ) -> str:
     token = secrets.token_urlsafe(8)
     connection = get_connection()
@@ -97,9 +123,10 @@ def create_watch_candidate(
                         chat_id,
                         product_query,
                         search_query,
-                        current_price
+                        current_price,
+                        city
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s);
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
                     """,
                     (
                         token,
@@ -108,6 +135,7 @@ def create_watch_candidate(
                         product_query,
                         search_query,
                         current_price,
+                        city,
                     ),
                 )
         return token
@@ -146,16 +174,18 @@ def activate_subscription(
                         chat_id,
                         product_query,
                         search_query,
+                        city,
                         baseline_price,
                         last_seen_price,
                         active,
                         updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
                     ON CONFLICT (telegram_user_id, product_query)
                     DO UPDATE SET
                         chat_id = EXCLUDED.chat_id,
                         search_query = EXCLUDED.search_query,
+                        city = EXCLUDED.city,
                         baseline_price = EXCLUDED.baseline_price,
                         last_seen_price = EXCLUDED.last_seen_price,
                         last_notified_price = NULL,
@@ -169,6 +199,7 @@ def activate_subscription(
                         candidate["chat_id"],
                         candidate["product_query"],
                         candidate["search_query"],
+                        candidate["city"],
                         candidate["current_price"],
                         candidate["current_price"],
                     ),
@@ -306,6 +337,64 @@ def record_price_check(
                         """,
                         (current_price, subscription_id),
                     )
+    finally:
+        connection.close()
+
+
+def normalize_city(city: str) -> str:
+    return " ".join(city.strip().split())
+
+
+def set_user_city(
+    telegram_user_id: int,
+    city: str,
+) -> str:
+    normalized = normalize_city(city)
+    if len(normalized) < 2 or len(normalized) > 80:
+        raise ValueError("Invalid city")
+
+    connection = get_connection()
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO user_profiles (
+                        telegram_user_id,
+                        city,
+                        updated_at
+                    )
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (telegram_user_id)
+                    DO UPDATE SET
+                        city = EXCLUDED.city,
+                        updated_at = NOW();
+                    """,
+                    (telegram_user_id, normalized),
+                )
+        return normalized
+    finally:
+        connection.close()
+
+
+def get_user_city(
+    telegram_user_id: int,
+) -> str:
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT city
+                FROM user_profiles
+                WHERE telegram_user_id = %s;
+                """,
+                (telegram_user_id,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return str(row[0])
+            return "Москва, Россия"
     finally:
         connection.close()
 
