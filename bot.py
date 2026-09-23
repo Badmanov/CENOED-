@@ -1320,6 +1320,10 @@ async def setup_webhook():
 
         drop_pending_updates=False,
 
+        allowed_updates=(
+            dp.resolve_used_update_types()
+        ),
+
     )
 
 
