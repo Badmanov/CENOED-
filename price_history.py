@@ -2,6 +2,7 @@ import hashlib
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -64,32 +65,55 @@ def build_market_key(
     )
 
 
+def normalize_store_domain(
+    link: str | None,
+) -> str:
+    """Возвращает стабильный домен магазина без пути и параметров."""
+
+    if not link:
+        return ""
+
+    try:
+        hostname = (
+            urlparse(str(link).strip()).hostname
+            or ""
+        ).lower()
+    except (TypeError, ValueError):
+        return ""
+
+    if hostname.startswith("www."):
+        hostname = hostname[4:]
+
+    # Ссылки-посредники Google не идентифицируют продавца.
+    if (
+        hostname == "google.com"
+        or hostname.endswith(".google.com")
+    ):
+        return ""
+
+    return hostname
+
+
 def build_store_key(
+    product_query: str,
     store: str,
     link: str | None,
 ) -> str:
-    """
-    Ключ конкретного предложения.
+    """Стабильный ключ магазина внутри истории конкретного товара."""
 
-    Если есть ссылка — используем её.
-    Иначе используем магазин.
-    """
+    market_key = build_market_key(
+        product_query
+    )
 
-    if link:
+    store_identity = (
+        normalize_store_domain(link)
+        or normalize_identity(store)
+        or "unknown-store"
+    )
 
-        raw = (
-            "store-link|"
-            f"{normalize_identity(link)}"
-        )
-
-    else:
-
-        raw = (
-            "store|"
-            f"{normalize_identity(store)}"
-        )
-
-    return make_hash(raw)
+    return make_hash(
+        f"store|{market_key}|{store_identity}"
+    )
 
 
 # ============================================================
@@ -238,8 +262,13 @@ def save_price_and_get_history(
     )
 
     store_key = build_store_key(
+        product_query,
         store,
         link,
+    )
+
+    normalized_store = normalize_identity(
+        store
     )
 
     connection = get_connection()
@@ -262,12 +291,22 @@ def save_price_and_get_history(
                         price,
                         observed_at
                     FROM price_history
-                    WHERE store_key = %s
+                    WHERE market_key = %s
+                      AND (
+                          store_key = %s
+                          OR LOWER(
+                              TRIM(
+                                  COALESCE(store, '')
+                              )
+                          ) = %s
+                      )
                     ORDER BY observed_at DESC
                     LIMIT 1;
                     """,
                     (
+                        market_key,
                         store_key,
+                        normalized_store,
                     ),
                 )
 
