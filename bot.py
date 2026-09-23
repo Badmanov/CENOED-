@@ -12,6 +12,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
+    BotCommand,
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -494,6 +495,24 @@ async def subscriptions_handler(message: Message):
             inline_keyboard=buttons
         ),
     )
+
+
+@dp.callback_query(
+    lambda query:
+    query.data == "city_help"
+)
+async def city_help_callback(
+    callback: CallbackQuery,
+):
+    await callback.answer()
+
+    if callback.message:
+        await callback.message.answer(
+            "📍 <b>Как изменить город</b>\n\n"
+            "Отправь команду с названием города, например:\n"
+            "<code>/city Санкт-Петербург</code>\n\n"
+            "Текущий город можно посмотреть командой /city."
+        )
 
 
 @dp.callback_query(
@@ -1279,12 +1298,20 @@ async def message_handler(
     if watch_token:
 
         reply_markup = InlineKeyboardMarkup(
-            inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="🔔 Следить за снижением",
-                    callback_data=f"watch:{watch_token}",
-                )
-            ]]
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔔 Следить за снижением",
+                        callback_data=f"watch:{watch_token}",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📍 Изменить город",
+                        callback_data="city_help",
+                    )
+                ],
+            ]
         )
 
     await status_message.edit_text(
@@ -1608,6 +1635,22 @@ async def setup_webhook():
         ),
 
     )
+
+
+    await bot.set_my_commands([
+        BotCommand(
+            command="city",
+            description="Выбрать город поиска",
+        ),
+        BotCommand(
+            command="subscriptions",
+            description="Мои подписки",
+        ),
+        BotCommand(
+            command="start",
+            description="Помощь",
+        ),
+    ])
 
 
     await bot.set_webhook(
