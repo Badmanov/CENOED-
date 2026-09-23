@@ -10,8 +10,14 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart
-from aiogram.types import Message, Update
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    Update,
+)
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
@@ -22,7 +28,13 @@ from price_history import (
     init_database,
     save_price_and_get_history,
     calculate_price_change,
-    calculate_market_difference,
+)
+from subscriptions import (
+    activate_subscription,
+    create_watch_candidate,
+    deactivate_subscription,
+    init_subscriptions,
+    list_subscriptions,
 )
 
 
@@ -353,6 +365,150 @@ async def start_handler(
         "отправлю Ценоеда на охоту!"
 
     )
+
+
+# ============================================================
+# SUBSCRIPTIONS
+# ============================================================
+
+@dp.message(Command("subscriptions"))
+async def subscriptions_handler(message: Message):
+    if not message.from_user:
+        return
+
+    try:
+        items = await asyncio.to_thread(
+            list_subscriptions,
+            message.from_user.id,
+        )
+    except Exception as e:
+        print(
+            f"SUBSCRIPTIONS LIST ERROR: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        await message.answer(
+            "🔔 Не удалось открыть подписки. Попробуй позже."
+        )
+        return
+
+    if not items:
+        await message.answer(
+            "🔔 Активных подписок пока нет.\n\n"
+            "Найди товар и нажми «Следить за снижением»."
+        )
+        return
+
+    lines = ["🔔 <b>Мои подписки</b>", ""]
+    buttons = []
+
+    for item in items:
+        lines.append(
+            f"• {html.escape(item['product_query'])}\n"
+            f"  Последняя цена: "
+            f"{format_price(item['last_seen_price'])}"
+        )
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"Отключить: {item['product_query'][:24]}",
+                callback_data=f"unwatch:{item['id']}",
+            )
+        ])
+
+    await message.answer(
+        "\n\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        ),
+    )
+
+
+@dp.callback_query(
+    lambda query:
+    query.data
+    and query.data.startswith("watch:")
+)
+async def watch_callback(callback: CallbackQuery):
+    if not callback.from_user or not callback.data:
+        return
+
+    token = callback.data.split(":", 1)[1]
+
+    try:
+        subscription = await asyncio.to_thread(
+            activate_subscription,
+            token,
+            callback.from_user.id,
+        )
+    except Exception as e:
+        print(
+            f"SUBSCRIPTION ACTIVATE ERROR: "
+            f"{type(e).__name__}: {e}",
+            flush=True,
+        )
+        await callback.answer(
+            "Не удалось создать подписку.",
+            show_alert=True,
+        )
+        return
+
+    if subscription is None:
+        await callback.answer(
+            "Эта кнопка устарела. Выполни поиск ещё раз.",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer("Подписка включена")
+
+    if callback.message:
+        await callback.message.answer(
+            "🔔 <b>Подписка включена</b>\n\n"
+            f"{html.escape(subscription['product_query'])}\n"
+            "Сообщу при любом снижении цены. "
+            "Одинаковые уведомления повторять не буду.\n\n"
+            "Команда /subscriptions — управление подписками."
+        )
+
+
+@dp.callback_query(
+    lambda query:
+    query.data
+    and query.data.startswith("unwatch:")
+)
+async def unwatch_callback(callback: CallbackQuery):
+    if not callback.from_user or not callback.data:
+        return
+
+    try:
+        subscription_id = int(
+            callback.data.split(":", 1)[1]
+        )
+        removed = await asyncio.to_thread(
+            deactivate_subscription,
+            subscription_id,
+            callback.from_user.id,
+        )
+    except (TypeError, ValueError):
+        removed = False
+    except Exception as e:
+        print(
+            f"SUBSCRIPTION REMOVE ERROR: "
+            f"{type(e).__name__}: {e}",
+            flush=True,
+        )
+        removed = False
+
+    await callback.answer(
+        "Подписка отключена"
+        if removed
+        else "Подписка уже отключена",
+        show_alert=not removed,
+    )
+
+    if removed and callback.message:
+        await callback.message.edit_reply_markup(
+            reply_markup=None
+        )
 
 
 # ============================================================
@@ -961,6 +1117,36 @@ async def message_handler(
 
     )
 
+    watch_token = None
+
+    if message.from_user:
+
+        try:
+
+            watch_token = await asyncio.to_thread(
+
+                create_watch_candidate,
+
+                message.from_user.id,
+
+                message.chat.id,
+
+                user_query,
+
+                search_query,
+
+                lowest_price,
+
+            )
+
+        except Exception as e:
+
+            print(
+                f"WATCH CANDIDATE ERROR: "
+                f"{type(e).__name__}: {e}",
+                flush=True,
+            )
+
 
     lines.append(
 
@@ -972,141 +1158,6 @@ async def message_handler(
         "</b>"
 
     )
-
-
-    # ========================================================
-    # MARKET HISTORY
-    # ========================================================
-
-    if (
-        market_history
-        and market_history.get(
-            "observations",
-            0,
-        ) > 0
-        and market_history.get(
-            "min_price"
-        ) is not None
-    ):
-
-        market_min = (
-            market_history["min_price"]
-        )
-
-        market_max = (
-            market_history["max_price"]
-        )
-
-        market_difference = (
-            calculate_market_difference(
-                lowest_price,
-                market_min,
-            )
-        )
-
-        min_price_7d = (
-            market_history.get(
-                "min_price_7d"
-            )
-        )
-
-        min_price_30d = (
-            market_history.get(
-                "min_price_30d"
-            )
-        )
-
-        min_observed_at = (
-            format_history_datetime(
-                market_history.get(
-                    "min_observed_at"
-                )
-            )
-        )
-
-        last_observed_at = (
-            format_history_datetime(
-                market_history.get(
-                    "last_observed_at"
-                )
-            )
-        )
-
-        lines.extend([
-            "",
-            "📊 <b>Сохранённые наблюдения рынка</b>",
-        ])
-
-        if min_price_7d is not None:
-
-            lines.append(
-                "Минимум за 7 дней: "
-                f"{format_price(min_price_7d)}"
-            )
-
-        if min_price_30d is not None:
-
-            lines.append(
-                "Минимум за 30 дней: "
-                f"{format_price(min_price_30d)}"
-            )
-
-        market_min_line = (
-            "Минимум среди всех наблюдений: "
-            f"{format_price(market_min)}"
-        )
-
-        if min_observed_at:
-
-            market_min_line += (
-                f" — {min_observed_at}"
-            )
-
-        lines.extend([
-            market_min_line,
-            (
-                "Максимум среди наблюдений: "
-                f"{format_price(market_max)}"
-            ),
-            (
-                "Точек истории: "
-                f"{market_history['observations']}"
-            ),
-        ])
-
-        if last_observed_at:
-
-            lines.append(
-                "Последнее изменение/новое предложение: "
-                f"{last_observed_at}"
-            )
-
-        if market_difference is not None:
-
-            if abs(market_difference) < 0.05:
-
-                lines.append(
-                    "✅ Сейчас цена совпадает с минимумом "
-                    "среди сохранённых наблюдений."
-                )
-
-            elif market_difference > 0:
-
-                lines.append(
-                    "📈 Сейчас на "
-                    f"<b>{market_difference:.1f}%</b> "
-                    "выше минимума среди "
-                    "сохранённых наблюдений."
-                )
-
-            else:
-
-                lines.append(
-                    "📉 Текущая цена на "
-                    f"<b>{abs(market_difference):.1f}%</b> "
-                    "ниже прежнего минимума среди "
-                    "сохранённых наблюдений."
-                )
 
 
     # ========================================================
@@ -1126,57 +1177,26 @@ async def message_handler(
         )
 
 
-    # ========================================================
-    # HISTORY INFO
-    # ========================================================
+    reply_markup = None
 
-    lines.append("")
+    if watch_token:
 
-
-    if history_available:
-
-        lines.append(
-
-            "📊 <b>История цен сохраняется.</b>\n"
-
-            "Сравниваю текущие предложения "
-            "с сохранёнными наблюдениями."
-
+        reply_markup = InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(
+                    text="🔔 Следить за снижением",
+                    callback_data=f"watch:{watch_token}",
+                )
+            ]]
         )
-
-    else:
-
-        lines.append(
-
-            "📊 История цен временно "
-            "недоступна, но поиск работает."
-
-        )
-
-
-    # ========================================================
-    # DISCOUNT DISCLAIMER
-    # ========================================================
-
-    if max_discount is not None:
-
-        lines.append("")
-
-        lines.append(
-
-            "ℹ️ Скидка рассчитана "
-            "по указанной старой цене магазина. "
-            "Историческое сравнение цены "
-            "показывается отдельно."
-
-        )
-
 
     await status_message.edit_text(
 
         "\n".join(lines),
 
         disable_web_page_preview=True,
+
+        reply_markup=reply_markup,
 
     )
 
@@ -1328,6 +1348,9 @@ async def startup_event():
 
         await asyncio.to_thread(
             init_database
+        )
+        await asyncio.to_thread(
+            init_subscriptions
         )
 
         print(
