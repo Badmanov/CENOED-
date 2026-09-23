@@ -21,6 +21,7 @@ from price_history import (
     init_database,
     save_price_and_get_history,
     calculate_price_change,
+    calculate_market_difference,
 )
 
 
@@ -597,6 +598,7 @@ async def message_handler(
     # ========================================================
 
     history_available = True
+    market_history = None
 
     for item in filtered_results:
 
@@ -653,6 +655,23 @@ async def message_handler(
                     previous_price,
                 )
             )
+
+            # Первый успешный результат содержит статистику рынка,
+            # рассчитанную до сохранения текущей выдачи.
+            if market_history is None:
+
+                market_history = {
+                    "min_price": history.get(
+                        "market_min_price"
+                    ),
+                    "max_price": history.get(
+                        "market_max_price"
+                    ),
+                    "observations": history.get(
+                        "market_observations",
+                        0,
+                    ),
+                }
 
 
         except Exception as e:
@@ -917,6 +936,79 @@ async def message_handler(
 
 
     # ========================================================
+    # MARKET HISTORY
+    # ========================================================
+
+    if (
+        market_history
+        and market_history.get(
+            "observations",
+            0,
+        ) > 0
+        and market_history.get(
+            "min_price"
+        ) is not None
+    ):
+
+        market_min = (
+            market_history["min_price"]
+        )
+
+        market_max = (
+            market_history["max_price"]
+        )
+
+        market_difference = (
+            calculate_market_difference(
+                lowest_price,
+                market_min,
+            )
+        )
+
+        lines.extend([
+            "",
+            "📊 <b>История рынка</b>",
+            (
+                "Минимум за историю: "
+                f"{format_price(market_min)}"
+            ),
+            (
+                "Максимум за историю: "
+                f"{format_price(market_max)}"
+            ),
+            (
+                "Наблюдений: "
+                f"{market_history['observations']}"
+            ),
+        ])
+
+        if market_difference is not None:
+
+            if abs(market_difference) < 0.05:
+
+                lines.append(
+                    "✅ Сейчас цена на уровне "
+                    "исторического минимума."
+                )
+
+            elif market_difference > 0:
+
+                lines.append(
+                    "📈 Сейчас на "
+                    f"<b>{market_difference:.1f}%</b> "
+                    "выше исторического минимума."
+                )
+
+            else:
+
+                lines.append(
+                    "📉 Новый минимум: на "
+                    f"<b>{abs(market_difference):.1f}%</b> "
+                    "ниже предыдущего."
+                )
+
+
+    # ========================================================
     # MAX STORE DISCOUNT
     # ========================================================
 
@@ -946,8 +1038,8 @@ async def message_handler(
 
             "📊 <b>История цен сохраняется.</b>\n"
 
-            "При следующем поиске я смогу "
-            "сравнить цену с предыдущей."
+            "Сравниваю цены магазинов "
+            "и историю рынка."
 
         )
 
