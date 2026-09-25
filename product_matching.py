@@ -29,12 +29,15 @@ def normalize_text(text: str) -> str:
         "кг": "kg",
         "килограмм": "kg",
         "килограмма": "kg",
+        "килограммов": "kg",
 
         "мл": "ml",
         "миллилитров": "ml",
+        "миллилитра": "ml",
 
         "литров": "l",
         "литра": "l",
+        "литры": "l",
         "литр": "l",
 
         "шт.": "шт",
@@ -64,6 +67,13 @@ def normalize_text(text: str) -> str:
     text = re.sub(
         r"([a-zа-я])(\d)",
         r"\1 \2",
+        text,
+    )
+
+    # Decimal comma: 0,45 л -> 0.45 л
+    text = re.sub(
+        r"(?<=\d),(?=\d)",
+        ".",
         text,
     )
 
@@ -335,6 +345,44 @@ def extract_count(
         int(value)
         for value in matches
     ]
+
+
+# ============================================================
+# MULTIPACK
+# ============================================================
+
+def extract_pack_count(
+    text: str,
+):
+    normalized = normalize_text(
+        text
+    )
+
+    patterns = (
+        r"\b(\d+)\s*[xх]\s*\d",
+        r"\b\d+(?:\.\d+)?\s*(?:ml|l|kg|g)\s*[xх]\s*(\d+)\b",
+        (
+            r"\b(?:упаковка|набор|pack)\s*"
+            r"(?:из|of)?\s*(\d+)\b"
+        ),
+        (
+            r"\b(\d+)\s*"
+            r"(?:бутылок|бутылки|банок|банки|"
+            r"пачек|пачки|упаковок|упаковки)\b"
+        ),
+    )
+
+    for pattern in patterns:
+        match = re.search(
+            pattern,
+            normalized,
+        )
+        if match:
+            return int(
+                match.group(1)
+            )
+
+    return None
 
 
 # ============================================================
@@ -1023,6 +1071,24 @@ def attributes_match(
             value in title_count
             for value in query_count
         ):
+
+            return False
+
+    # --------------------------------------------------------
+    # Multipack
+    # --------------------------------------------------------
+
+    query_pack_count = extract_pack_count(
+        query
+    )
+
+    if query_pack_count is not None:
+
+        title_pack_count = extract_pack_count(
+            title
+        )
+
+        if title_pack_count != query_pack_count:
 
             return False
 
