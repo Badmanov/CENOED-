@@ -17,6 +17,12 @@ def normalize_text(text: str) -> str:
         "е",
     )
 
+    text = re.sub(
+        r"\bл\b",
+        "l",
+        text,
+    )
+
     grocery_replacements = (
         (
             r"\bфарш(?:а|у|ем|е)?\b",
