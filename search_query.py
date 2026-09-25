@@ -300,6 +300,54 @@ def build_regular_query(
 
 
 # ============================================================
+# BROADER FALLBACK QUERY
+# ============================================================
+
+PACKAGING_COUNT_PATTERNS = (
+    re.compile(
+        r"\b(?:упаковк\w*\s+(?:из|по)\s*)?"
+        r"\d+\s*"
+        r"(?:бутыл\w*|банк\w*|пач\w*|"
+        r"упаков\w*|шт\.?|pcs|pieces)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:pack|case)\s*(?:of\s*)?\d+\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b\d+\s*[xх×]\s*"
+        r"(?=\d+(?:[.,]\d+)?)",
+        re.IGNORECASE,
+    ),
+)
+
+
+def build_fallback_search_query(
+    query: str,
+) -> str:
+    """
+    Создаёт второй, менее строгий запрос,
+    если магазинный поиск не вернул результатов.
+
+    Убирается только количество единиц в упаковке.
+    Бренд, название товара, объём и вес сохраняются.
+    """
+
+    result = normalize_search_query(
+        query
+    )
+
+    for pattern in PACKAGING_COUNT_PATTERNS:
+        result = pattern.sub(
+            " ",
+            result,
+        )
+
+    return clean_spaces(result)
+
+
+# ============================================================
 # MAIN SEARCH QUERY BUILDER
 # ============================================================
 
