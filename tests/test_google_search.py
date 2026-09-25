@@ -2,6 +2,7 @@ import unittest
 
 from connectors.google_search import (
     _extract_price,
+    _is_product_link,
     _retailer_name,
 )
 
@@ -40,6 +41,20 @@ class GoogleSearchConnectorTests(unittest.TestCase):
         self.assertIsNone(
             _retailer_name(
                 "https://example.com/product"
+            )
+        )
+
+    def test_accepts_yandex_product_card(self):
+        self.assertTrue(
+            _is_product_link(
+                "https://market.yandex.ru/card/corona-extra/123"
+            )
+        )
+
+    def test_rejects_yandex_search_page(self):
+        self.assertFalse(
+            _is_product_link(
+                "https://market.yandex.ru/search?text=nolinskie"
             )
         )
 
