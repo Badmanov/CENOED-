@@ -88,8 +88,16 @@ def init_subscriptions() -> None:
                     CREATE TABLE IF NOT EXISTS user_profiles (
                         telegram_user_id BIGINT PRIMARY KEY,
                         city TEXT NOT NULL,
+                        adult_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     );
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE user_profiles
+                    ADD COLUMN IF NOT EXISTS
+                    adult_confirmed BOOLEAN NOT NULL DEFAULT FALSE;
                     """
                 )
     finally:
@@ -395,6 +403,53 @@ def get_user_city(
             if row and row[0]:
                 return str(row[0])
             return "Москва, Россия"
+    finally:
+        connection.close()
+
+
+def is_adult_confirmed(
+    telegram_user_id: int,
+) -> bool:
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT adult_confirmed
+                FROM user_profiles
+                WHERE telegram_user_id = %s;
+                """,
+                (telegram_user_id,),
+            )
+            row = cursor.fetchone()
+            return bool(row and row[0])
+    finally:
+        connection.close()
+
+
+def confirm_adult(
+    telegram_user_id: int,
+) -> None:
+    connection = get_connection()
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO user_profiles (
+                        telegram_user_id,
+                        city,
+                        adult_confirmed,
+                        updated_at
+                    )
+                    VALUES (%s, 'Москва, Россия', TRUE, NOW())
+                    ON CONFLICT (telegram_user_id)
+                    DO UPDATE SET
+                        adult_confirmed = TRUE,
+                        updated_at = NOW();
+                    """,
+                    (telegram_user_id,),
+                )
     finally:
         connection.close()
 
