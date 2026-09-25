@@ -99,6 +99,13 @@ def clean_query(text: str) -> str:
     )
 
 
+ALCOHOL_QUERY_PHRASES = {
+    "corona extra",
+    "винлаб",
+    "красное белое",
+}
+
+
 ALCOHOL_QUERY_TERMS = {
     "пиво",
     "beer",
@@ -134,13 +141,20 @@ ALCOHOL_QUERY_TERMS = {
 
 
 def is_age_restricted_query(text: str) -> bool:
-    tokens = set(
+    normalized = " ".join(
         re.findall(
             r"[a-zа-яё]+",
             text.casefold(),
         )
     )
-    return bool(tokens & ALCOHOL_QUERY_TERMS)
+    tokens = set(normalized.split())
+    return (
+        bool(tokens & ALCOHOL_QUERY_TERMS)
+        or any(
+            phrase in normalized
+            for phrase in ALCOHOL_QUERY_PHRASES
+        )
+    )
 
 
 def format_retailer_name(
