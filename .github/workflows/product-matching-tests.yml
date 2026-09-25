@@ -7,12 +7,14 @@ on:
     paths:
       - "product_matching.py"
       - "search_query.py"
+      - "connectors/google_search.py"
       - "tests/**"
       - ".github/workflows/product-matching-tests.yml"
   pull_request:
     paths:
       - "product_matching.py"
       - "search_query.py"
+      - "connectors/google_search.py"
       - "tests/**"
 
 permissions:

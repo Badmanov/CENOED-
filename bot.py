@@ -22,8 +22,12 @@ from aiogram.types import (
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
+from connectors.google_search import search_retailer_web
 from connectors.google_shopping import search_google_shopping
-from product_matching import is_relevant_result
+from product_matching import (
+    extract_pack_count,
+    is_relevant_result,
+)
 from search_query import (
     build_fallback_search_query,
     build_search_query,
@@ -1038,6 +1042,30 @@ async def message_handler(
                 if results:
                     search_query = fallback_query
 
+        if (
+            not results
+            and is_age_restricted_query(
+                user_query
+            )
+        ):
+            web_query = (
+                build_fallback_search_query(
+                    user_query
+                )
+            )
+            results = await asyncio.to_thread(
+
+                search_retailer_web,
+
+                web_query,
+
+                user_city,
+
+            )
+
+            if results:
+                search_query = web_query
+
     except Exception as e:
 
         print(
@@ -1161,6 +1189,51 @@ async def message_handler(
 
             relevant = False
 
+
+        if (
+            not relevant
+            and item.get("web_search_result")
+        ):
+            requested_pack = extract_pack_count(
+                user_query
+            )
+            unit_query = (
+                build_fallback_search_query(
+                    user_query
+                )
+            )
+            item_pack = extract_pack_count(
+                title
+            )
+
+            if (
+                requested_pack
+                and item_pack is None
+                and unit_query
+            ):
+                try:
+                    relevant = is_relevant_result(
+
+                        unit_query,
+
+                        item,
+
+                    )
+                except Exception:
+                    relevant = False
+
+                if relevant:
+                    item["unit_numeric_price"] = (
+                        item["numeric_price"]
+                    )
+                    item["numeric_price"] = round(
+                        item["numeric_price"]
+                        * requested_pack,
+                        2,
+                    )
+                    item["calculated_pack_count"] = (
+                        requested_pack
+                    )
 
         if relevant:
 
@@ -1495,6 +1568,16 @@ async def message_handler(
             )
 
 
+        calculation_line = ""
+
+        if item.get("calculated_pack_count"):
+            calculation_line = (
+                "\n   ≈ Расчёт: "
+                f"{item['calculated_pack_count']} × "
+                f"{format_price(item['unit_numeric_price'])}"
+            )
+
+
         # ----------------------------------------------------
         # RESULT
         # ----------------------------------------------------
@@ -1506,6 +1589,7 @@ async def message_handler(
             f"{price_line}\n"
 
             f"   {title}"
+            f"{calculation_line}"
 
         )
 
