@@ -1264,12 +1264,34 @@ async def message_handler(
             )
 
 
+    lowest_link = filtered_results[0].get(
+        "link"
+    )
+
+    lowest_price_text = html.escape(
+        format_price(lowest_price)
+    )
+
+    if lowest_link:
+
+        safe_lowest_link = html.escape(
+            str(lowest_link),
+            quote=True,
+        )
+
+        lowest_price_text = (
+            f'<a href="{safe_lowest_link}">'
+            f"{lowest_price_text}"
+            "</a>"
+        )
+
+
     lines.append(
 
         "🔥 <b>Самая низкая "
         "найденная цена: "
 
-        f"{format_price(lowest_price)}"
+        f"{lowest_price_text}"
 
         "</b>"
 
