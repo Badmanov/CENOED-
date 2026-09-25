@@ -241,6 +241,46 @@ def format_retailer_name(
     return original
 
 
+def offer_retailer_key(
+    item: dict[str, Any],
+) -> str:
+    store = str(
+        item.get("store")
+        or "Магазин"
+    ).strip()
+
+    canonical = format_retailer_name(
+        store,
+        item.get("link"),
+    )
+
+    return re.sub(
+        r"[^a-zа-яё0-9]+",
+        " ",
+        canonical.casefold(),
+    ).strip()
+
+
+def cheapest_offer_per_retailer(
+    offers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    unique_offers = []
+    seen_retailers = set()
+
+    for offer in offers:
+        retailer_key = offer_retailer_key(
+            offer
+        )
+
+        if retailer_key in seen_retailers:
+            continue
+
+        seen_retailers.add(retailer_key)
+        unique_offers.append(offer)
+
+    return unique_offers
+
+
 def format_history_datetime(
     value: Any,
 ) -> str | None:
@@ -1131,7 +1171,9 @@ async def message_handler(
 
 
     filtered_results = (
-        filtered_results[:10]
+        cheapest_offer_per_retailer(
+            filtered_results
+        )[:10]
     )
 
 
