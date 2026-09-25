@@ -1167,6 +1167,12 @@ async def message_handler(
             item.get("title")
             or ""
         )
+        match_text = (
+            item.get("match_text")
+            or title
+        )
+        matching_item = dict(item)
+        matching_item["title"] = match_text
 
 
         try:
@@ -1175,7 +1181,7 @@ async def message_handler(
 
                 user_query,
 
-                item,
+                matching_item,
 
             )
 
@@ -1216,7 +1222,7 @@ async def message_handler(
 
                         unit_query,
 
-                        item,
+                        matching_item,
 
                     )
                 except Exception:
