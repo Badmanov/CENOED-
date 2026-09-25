@@ -1649,40 +1649,69 @@ def find_lowest_subscription_offer(
     prepared_query: str,
     city: str,
 ) -> dict[str, Any] | None:
+    def matching_offers(
+        results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        matching = []
+
+        for item in results or []:
+            raw_price = (
+                item.get("price")
+                if item.get("price") is not None
+                else item.get("price_text")
+            )
+            numeric_price = parse_price(
+                raw_price
+            )
+
+            if numeric_price is None:
+                continue
+
+            try:
+                relevant = is_relevant_result(
+                    product_query,
+                    item,
+                )
+            except Exception:
+                relevant = False
+
+            if not relevant:
+                continue
+
+            item = dict(item)
+            item["numeric_price"] = numeric_price
+            matching.append(item)
+
+        return matching
+
     results = search_google_shopping(
         prepared_query,
         city,
     )
+    matching = matching_offers(
+        results
+    )
 
-    matching = []
-
-    for item in results or []:
-        raw_price = (
-            item.get("price")
-            if item.get("price") is not None
-            else item.get("price_text")
-        )
-        numeric_price = parse_price(
-            raw_price
-        )
-
-        if numeric_price is None:
-            continue
-
-        try:
-            relevant = is_relevant_result(
-                product_query,
-                item,
+    if not matching:
+        fallback_query = (
+            build_fallback_search_query(
+                product_query
             )
-        except Exception:
-            relevant = False
+        )
 
-        if not relevant:
-            continue
-
-        item = dict(item)
-        item["numeric_price"] = numeric_price
-        matching.append(item)
+        if (
+            fallback_query
+            and fallback_query != prepared_query
+        ):
+            fallback_results = (
+                search_google_shopping(
+                    fallback_query,
+                    city,
+                )
+            )
+            matching = matching_offers(
+                fallback_results
+            )
 
     if not matching:
         return None
