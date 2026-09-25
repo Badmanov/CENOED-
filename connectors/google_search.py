@@ -160,9 +160,17 @@ def search_retailer_web(
         ):
             continue
 
+        title = str(result.get("title") or "").strip()
+        snippet = str(result.get("snippet") or "").strip()
+        match_text = " ".join(
+            part for part in (title, snippet) if part
+        )
+
         offers.append(
             {
-                "title": result.get("title"),
+                "title": title or "Товар",
+                "match_text": match_text,
+                "snippet": snippet,
                 "price": price,
                 "price_text": None,
                 "old_price": None,
