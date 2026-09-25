@@ -24,7 +24,10 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from connectors.google_shopping import search_google_shopping
 from product_matching import is_relevant_result
-from search_query import build_search_query
+from search_query import (
+    build_fallback_search_query,
+    build_search_query,
+)
 from price_history import (
     init_database,
     save_price_and_get_history,
@@ -1004,6 +1007,36 @@ async def message_handler(
             user_city,
 
         )
+
+        if not results:
+            fallback_query = (
+                build_fallback_search_query(
+                    user_query
+                )
+            )
+
+            if (
+                fallback_query
+                and fallback_query != search_query
+            ):
+                print(
+                    f"FALLBACK SEARCH QUERY: "
+                    f"{fallback_query}",
+                    flush=True,
+                )
+
+                results = await asyncio.to_thread(
+
+                    search_google_shopping,
+
+                    fallback_query,
+
+                    user_city,
+
+                )
+
+                if results:
+                    search_query = fallback_query
 
     except Exception as e:
 
