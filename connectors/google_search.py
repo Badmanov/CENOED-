@@ -100,6 +100,21 @@ def _retailer_name(link: str) -> str | None:
     return None
 
 
+def _is_product_link(link: str) -> bool:
+    parsed = urlparse(link)
+    hostname = (parsed.hostname or "").casefold()
+    path = parsed.path.casefold()
+
+    if "market.yandex" in hostname:
+        return (
+            path.startswith("/card/")
+            or path.startswith("/product/")
+            or "/product--" in path
+        )
+
+    return True
+
+
 def search_retailer_web(
     query: str,
     location: str | None = None,
@@ -156,6 +171,7 @@ def search_retailer_web(
         if (
             not link
             or not retailer
+            or not _is_product_link(link)
             or price is None
         ):
             continue
