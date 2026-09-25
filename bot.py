@@ -1739,36 +1739,71 @@ def find_lowest_subscription_offer(
     prepared_query: str,
     city: str,
 ) -> dict[str, Any] | None:
+    fallback_query = build_fallback_search_query(
+        product_query
+    )
+    requested_pack = extract_pack_count(
+        product_query
+    )
+
     def matching_offers(
         results: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         matching = []
 
-        for item in results or []:
+        for raw_item in results or []:
+            item = dict(raw_item)
             raw_price = (
                 item.get("price")
                 if item.get("price") is not None
                 else item.get("price_text")
             )
-            numeric_price = parse_price(
-                raw_price
-            )
-
+            numeric_price = parse_price(raw_price)
             if numeric_price is None:
                 continue
+
+            title = item.get("title") or ""
+            matching_item = dict(item)
+            matching_item["title"] = (
+                item.get("match_text") or title
+            )
 
             try:
                 relevant = is_relevant_result(
                     product_query,
-                    item,
+                    matching_item,
                 )
             except Exception:
                 relevant = False
 
+            if (
+                not relevant
+                and item.get("web_search_result")
+                and requested_pack
+                and extract_pack_count(title) is None
+                and fallback_query
+            ):
+                try:
+                    relevant = is_relevant_result(
+                        fallback_query,
+                        matching_item,
+                    )
+                except Exception:
+                    relevant = False
+
+                if relevant:
+                    item["unit_numeric_price"] = numeric_price
+                    numeric_price = round(
+                        numeric_price * requested_pack,
+                        2,
+                    )
+                    item["calculated_pack_count"] = (
+                        requested_pack
+                    )
+
             if not relevant:
                 continue
 
-            item = dict(item)
             item["numeric_price"] = numeric_price
             matching.append(item)
 
@@ -1778,38 +1813,37 @@ def find_lowest_subscription_offer(
         prepared_query,
         city,
     )
-    matching = matching_offers(
-        results
-    )
+    matching = matching_offers(results)
 
-    if not matching:
-        fallback_query = (
-            build_fallback_search_query(
-                product_query
-            )
+    if (
+        not matching
+        and fallback_query
+        and fallback_query != prepared_query
+    ):
+        fallback_results = search_google_shopping(
+            fallback_query,
+            city,
+        )
+        matching = matching_offers(
+            fallback_results
         )
 
-        if (
-            fallback_query
-            and fallback_query != prepared_query
-        ):
-            fallback_results = (
-                search_google_shopping(
-                    fallback_query,
-                    city,
-                )
-            )
-            matching = matching_offers(
-                fallback_results
-            )
+    if (
+        not matching
+        and is_age_restricted_query(product_query)
+    ):
+        web_results = search_retailer_web(
+            fallback_query or prepared_query,
+            city,
+        )
+        matching = matching_offers(web_results)
 
     if not matching:
         return None
 
     return min(
         matching,
-        key=lambda item:
-        item["numeric_price"],
+        key=lambda item: item["numeric_price"],
     )
 
 
