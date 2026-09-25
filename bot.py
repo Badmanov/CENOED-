@@ -1496,35 +1496,6 @@ async def message_handler(
 
 
         # ----------------------------------------------------
-        # PRICE HISTORY
-        # ----------------------------------------------------
-
-        previous_price = (
-            item.get("previous_price")
-        )
-
-
-        history_text = format_price_change(
-
-            current_price,
-
-            previous_price,
-
-        )
-
-
-        if history_text:
-
-            history_block = (
-                f"\n{history_text}"
-            )
-
-        else:
-
-            history_block = ""
-
-
-        # ----------------------------------------------------
         # RESULT
         # ----------------------------------------------------
 
@@ -1535,8 +1506,6 @@ async def message_handler(
             f"{price_line}\n"
 
             f"   {title}"
-
-            f"{history_block}"
 
         )
 
