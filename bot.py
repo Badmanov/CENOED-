@@ -38,6 +38,8 @@ from subscriptions import (
     list_subscriptions,
     get_due_subscriptions,
     get_user_city,
+    is_adult_confirmed,
+    confirm_adult,
     record_price_check,
     set_user_city,
     should_notify,
@@ -95,6 +97,50 @@ def clean_query(text: str) -> str:
         " ",
         text.strip(),
     )
+
+
+ALCOHOL_QUERY_TERMS = {
+    "пиво",
+    "beer",
+    "lager",
+    "эль",
+    "ale",
+    "сидр",
+    "cider",
+    "вино",
+    "wine",
+    "шампанское",
+    "champagne",
+    "просекко",
+    "prosecco",
+    "водка",
+    "vodka",
+    "виски",
+    "whiskey",
+    "whisky",
+    "ром",
+    "rum",
+    "джин",
+    "gin",
+    "текила",
+    "tequila",
+    "коньяк",
+    "brandy",
+    "бренди",
+    "ликер",
+    "ликёр",
+    "liqueur",
+}
+
+
+def is_age_restricted_query(text: str) -> bool:
+    tokens = set(
+        re.findall(
+            r"[a-zа-яё]+",
+            text.casefold(),
+        )
+    )
+    return bool(tokens & ALCOHOL_QUERY_TERMS)
 
 
 def format_retailer_name(
@@ -689,6 +735,67 @@ async def unwatch_callback(callback: CallbackQuery):
 
 
 # ============================================================
+# AGE CONFIRMATION
+# ============================================================
+
+@dp.callback_query(
+    lambda query:
+    query.data == "age18_confirm"
+)
+async def age18_confirm_callback(
+    callback: CallbackQuery,
+):
+    if not callback.from_user:
+        return
+
+    try:
+        await asyncio.to_thread(
+            confirm_adult,
+            callback.from_user.id,
+        )
+    except Exception as e:
+        print(
+            f"AGE CONFIRM ERROR: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        await callback.answer(
+            "Не удалось сохранить подтверждение. Попробуй позже.",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer("Возраст подтверждён")
+
+    if callback.message:
+        await callback.message.edit_reply_markup(
+            reply_markup=None
+        )
+        await callback.message.answer(
+            "✅ <b>Возраст подтверждён</b>\n\n"
+            "Теперь повтори запрос товара. "
+            "Больше подтверждать возраст не потребуется."
+        )
+
+
+@dp.callback_query(
+    lambda query:
+    query.data == "age18_cancel"
+)
+async def age18_cancel_callback(
+    callback: CallbackQuery,
+):
+    await callback.answer("Поиск отменён")
+
+    if callback.message:
+        await callback.message.edit_reply_markup(
+            reply_markup=None
+        )
+        await callback.message.answer(
+            "Поиск товара категории 18+ отменён."
+        )
+
+
+# ============================================================
 # SEARCH
 # ============================================================
 
@@ -739,6 +846,48 @@ async def message_handler(
         )
 
         return
+
+
+    if (
+        message.from_user
+        and is_age_restricted_query(user_query)
+    ):
+        try:
+            adult_confirmed = await asyncio.to_thread(
+                is_adult_confirmed,
+                message.from_user.id,
+            )
+        except Exception as e:
+            print(
+                f"AGE CHECK ERROR: {type(e).__name__}: {e}",
+                flush=True,
+            )
+            adult_confirmed = False
+
+        if not adult_confirmed:
+            await message.answer(
+                "🔞 <b>Подтверждение возраста</b>\n\n"
+                "Поиск алкогольной продукции доступен только "
+                "совершеннолетним пользователям.\n"
+                "Подтверди, что тебе уже исполнилось 18 лет.",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="✅ Мне есть 18 лет",
+                                callback_data="age18_confirm",
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="❌ Отмена",
+                                callback_data="age18_cancel",
+                            )
+                        ],
+                    ]
+                ),
+            )
+            return
 
 
     # --------------------------------------------------------
