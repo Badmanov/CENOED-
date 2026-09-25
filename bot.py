@@ -97,6 +97,90 @@ def clean_query(text: str) -> str:
     )
 
 
+def format_retailer_name(
+    store: Any,
+    link: Any = None,
+) -> str:
+    original = str(
+        store or "Магазин"
+    ).strip()
+
+    identity = (
+        f"{original} {link or ''}"
+    ).casefold()
+
+    retailers = (
+        (
+            ("ozon", "ozon.ru"),
+            "🟦 Ozon",
+        ),
+        (
+            (
+                "wildberries",
+                "wildberries.ru",
+                "wb.ru",
+            ),
+            "🟪 Wildberries",
+        ),
+        (
+            (
+                "яндекс маркет",
+                "yandex market",
+                "market.yandex",
+            ),
+            "🟨 Яндекс Маркет",
+        ),
+        (
+            ("пятёрочка", "пятерочка", "5ka.ru"),
+            "🟢 Пятёрочка",
+        ),
+        (
+            ("перекрёсток", "перекресток", "perekrestok.ru"),
+            "🟢 Перекрёсток",
+        ),
+        (
+            ("дикси", "dixy.ru"),
+            "🟠 Дикси",
+        ),
+        (
+            ("магнит", "magnit.ru"),
+            "🔴 Магнит",
+        ),
+        (
+            ("вкусвилл", "vkusvill.ru"),
+            "🟢 ВкусВилл",
+        ),
+        (
+            (
+                "азбука вкуса",
+                "av.ru",
+            ),
+            "🟣 Азбука Вкуса",
+        ),
+        (
+            ("винлаб", "winelab.ru"),
+            "🔞 ВинЛаб",
+        ),
+        (
+            (
+                "красное белое",
+                "красное & белое",
+                "krasnoeibeloe.ru",
+            ),
+            "🔞 Красное & Белое",
+        ),
+    )
+
+    for markers, label in retailers:
+        if any(
+            marker in identity
+            for marker in markers
+        ):
+            return label
+
+    return original
+
+
 def format_history_datetime(
     value: Any,
 ) -> str | None:
@@ -1035,18 +1119,20 @@ async def message_handler(
         )
 
 
-        store = html.escape(
-
-            item.get("store")
-            or "Магазин",
-
-            quote=True,
-
+        raw_link = item.get(
+            "link"
         )
 
 
-        raw_link = item.get(
-            "link"
+        store = html.escape(
+
+            format_retailer_name(
+                item.get("store"),
+                raw_link,
+            ),
+
+            quote=True,
+
         )
 
 
@@ -1465,8 +1551,10 @@ async def check_price_subscriptions() -> dict[str, int]:
                 )
 
                 store = html.escape(
-                    offer.get("store")
-                    or "Магазин"
+                    format_retailer_name(
+                        offer.get("store"),
+                        offer.get("link"),
+                    )
                 )
                 title = html.escape(
                     offer.get("title")
