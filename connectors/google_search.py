@@ -4,7 +4,9 @@ from typing import Any
 from urllib.parse import urlparse
 
 SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 SCRAPEDO_SEARCH_URL = "https://api.scrape.do/plugin/google/search"
+SERPAPI_SEARCH_URL = "https://serpapi.com/search.json"
 
 
 # ============================================================
@@ -59,6 +61,11 @@ STORE_SELECTION_RETAILERS = {
     "🟣 Азбука Вкуса",
     "🟡 Чижик",
     "🔴 Светофор",
+}
+
+PREFERRED_RETAILERS = {
+    name
+    for _, name in RETAILER_DOMAINS
 }
 
 
@@ -344,35 +351,75 @@ def search_retailer_web(
 
     import requests
 
-    if not SCRAPEDO_TOKEN:
-        raise RuntimeError(
-            "SCRAPEDO_TOKEN is not set"
-        )
-
     retailer_hint = _retailer_search_hint()
+    search_text = f"{query} {retailer_hint}"
+    errors: list[str] = []
+    data: dict[str, Any] | None = None
 
-    params = {
-        "token": SCRAPEDO_TOKEN,
-        "q": f"{query} {retailer_hint}",
-        "hl": "ru",
-        "gl": "ru",
-        "google_domain": "google.ru",
-        "device": "desktop",
-        "resolveGoto": "true",
-    }
+    if SCRAPEDO_TOKEN:
+        params = {
+            "token": SCRAPEDO_TOKEN,
+            "q": search_text,
+            "hl": "ru",
+            "gl": "ru",
+            "google_domain": "google.ru",
+            "device": "desktop",
+            "resolveGoto": "true",
+        }
+        if location:
+            params["location"] = location
 
-    if location:
-        params["location"] = location
+        try:
+            response = requests.get(
+                SCRAPEDO_SEARCH_URL,
+                params=params,
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except Exception as error:
+            errors.append(
+                f"Scrape.do: {type(error).__name__}"
+            )
 
-    response = requests.get(
-        SCRAPEDO_SEARCH_URL,
-        params=params,
-        timeout=60,
-    )
+    if data is None and SERPAPI_KEY:
+        params = {
+            "api_key": SERPAPI_KEY,
+            "engine": "google",
+            "q": search_text,
+            "hl": "ru",
+            "gl": "ru",
+            "google_domain": "google.ru",
+            "device": "desktop",
+        }
+        if location:
+            params["location"] = location
 
-    response.raise_for_status()
+        try:
+            response = requests.get(
+                SERPAPI_SEARCH_URL,
+                params=params,
+                timeout=60,
+            )
+            response.raise_for_status()
+            candidate = response.json()
+            if candidate.get("error"):
+                raise RuntimeError(str(candidate["error"]))
+            data = candidate
+        except Exception as error:
+            errors.append(
+                f"SerpApi: {type(error).__name__}"
+            )
 
-    data = response.json()
+    if data is None:
+        if not errors:
+            raise RuntimeError(
+                "No retailer search provider is configured"
+            )
+        raise RuntimeError(
+            "Retailer search providers failed: "
+            + "; ".join(errors)
+        )
 
     raw_results = data.get(
         "organic_results",
