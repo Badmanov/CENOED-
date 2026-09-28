@@ -13,15 +13,28 @@ SERPAPI_URL = "https://serpapi.com/search.json"
 SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
 
 
+def _runtime_key(name: str, imported_value: str | None) -> str | None:
+    """Read credentials at request time and ignore accidental whitespace."""
+    value = os.getenv(name)
+    if value is None:
+        value = imported_value
+    if not value:
+        return None
+    return value.strip() or None
+
+
 def _fetch_shopping_data(
     query: str,
     location: str | None,
 ) -> dict[str, Any]:
     errors: list[str] = []
+    scrapedo_token = _runtime_key("SCRAPEDO_TOKEN", SCRAPEDO_TOKEN)
+    serpapi_key = _runtime_key("SERPAPI_KEY", SERPAPI_KEY)
+    searchapi_key = _runtime_key("SEARCHAPI_KEY", SEARCHAPI_KEY)
 
-    if SCRAPEDO_TOKEN:
+    if scrapedo_token:
         params = {
-            "token": SCRAPEDO_TOKEN,
+            "token": scrapedo_token,
             "q": query,
             "hl": "ru",
             "gl": "ru",
@@ -45,9 +58,9 @@ def _fetch_shopping_data(
                 f"Scrape.do: {type(error).__name__}"
             )
 
-    if SERPAPI_KEY:
+    if serpapi_key:
         params = {
-            "api_key": SERPAPI_KEY,
+            "api_key": serpapi_key,
             "engine": "google_shopping",
             "q": query,
             "hl": "ru",
@@ -74,9 +87,9 @@ def _fetch_shopping_data(
                 f"SerpApi: {type(error).__name__}"
             )
 
-    if SEARCHAPI_KEY:
+    if searchapi_key:
         params = {
-            "api_key": SEARCHAPI_KEY,
+            "api_key": searchapi_key,
             "engine": "google_shopping",
             "q": query,
             "hl": "ru",
