@@ -11,6 +11,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     BotCommand,
     CallbackQuery,
@@ -81,6 +83,10 @@ dp = Dispatcher()
 app = FastAPI()
 
 bot: Bot | None = None
+
+
+class StoreSelection(StatesGroup):
+    waiting_for_location = State()
 
 
 # ============================================================
@@ -413,6 +419,19 @@ def format_store_selection_notice(
     return "\n".join(lines)
 
 
+def store_selection_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🏪 Выбрать магазин",
+                    callback_data="store_help",
+                )
+            ]
+        ]
+    )
+
+
 def format_history_datetime(
     value: Any,
 ) -> str | None:
@@ -684,7 +703,6 @@ async def start_handler(
         "• Чехол iPhone 17 Pro\n\n"
 
         "📍 Город поиска: команда /city\n"
-        "🏪 Торговая точка: команда /store\n"
         "🔔 Подписки: команда /subscriptions\n\n"
         "🦖 Отправляй товар — "
         "отправлю Ценоеда на охоту!"
@@ -917,15 +935,81 @@ async def city_help_callback(
 )
 async def store_help_callback(
     callback: CallbackQuery,
+    state: FSMContext,
 ):
     await callback.answer()
 
+    await state.set_state(
+        StoreSelection.waiting_for_location
+    )
+
     if callback.message:
         await callback.message.answer(
-            "🏪 <b>Как выбрать торговую точку</b>\n\n"
-            "Отправь сеть и адрес или ближайшее метро, например:\n"
-            "<code>/store Красное &amp; Белое, ул. Тверская, 12</code>\n\n"
-            "Текущую точку можно посмотреть командой /store."
+            "🏪 <b>Выбери торговую точку</b>\n\n"
+            "Напиши обычным сообщением сеть и адрес "
+            "или ближайшее метро.\n\n"
+            "Например:\n"
+            "<code>Красное &amp; Белое, ул. Тверская, 12</code>\n\n"
+            "Для отмены напиши: <code>отмена</code>"
+        )
+
+
+@dp.message(StoreSelection.waiting_for_location)
+async def store_location_message(
+    message: Message,
+    state: FSMContext,
+):
+    if not message.from_user or not message.text:
+        return
+
+    raw_location = clean_query(message.text)
+    if raw_location.casefold() in {"отмена", "cancel"}:
+        await state.clear()
+        await message.answer("Выбор магазина отменён.")
+        return
+
+    state_data = await state.get_data()
+    pending_product_query = str(
+        state_data.get("pending_product_query") or ""
+    ).strip()
+
+    try:
+        saved = await asyncio.to_thread(
+            set_user_store_location,
+            message.from_user.id,
+            raw_location,
+        )
+    except (ValueError, TypeError):
+        await message.answer(
+            "🏪 Напиши адрес подробнее: сеть, улицу и номер дома "
+            "или ближайшее метро."
+        )
+        return
+    except Exception as e:
+        print(
+            f"STORE SAVE ERROR: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        await state.clear()
+        await message.answer(
+            "🏪 Не удалось сохранить магазин. Попробуй ещё раз позже."
+        )
+        return
+
+    await state.clear()
+    await message.answer(
+        "✅ <b>Магазин сохранён</b>\n\n"
+        f"🏪 {html.escape(saved)}\n\n"
+        "🔎 Автоматически повторяю поиск товара…"
+    )
+
+    if pending_product_query:
+        repeated_message = message.model_copy(
+            update={"text": pending_product_query}
+        )
+        await message_handler(
+            repeated_message,
+            state,
         )
 
 
@@ -1086,6 +1170,7 @@ async def age18_cancel_callback(
 @dp.message()
 async def message_handler(
     message: Message,
+    state: FSMContext,
 ):
 
     if not message.text:
@@ -1103,6 +1188,10 @@ async def message_handler(
 
     user_query = clean_query(
         message.text
+    )
+
+    await state.update_data(
+        pending_product_query=user_query
     )
 
     if message.from_user:
@@ -1405,6 +1494,8 @@ async def message_handler(
 
                 disable_web_page_preview=True,
 
+                reply_markup=store_selection_keyboard(),
+
             )
 
             return
@@ -1534,6 +1625,8 @@ async def message_handler(
                 ),
 
                 disable_web_page_preview=True,
+
+                reply_markup=store_selection_keyboard(),
 
             )
 
@@ -2420,10 +2513,6 @@ async def setup_webhook():
         BotCommand(
             command="city",
             description="Выбрать город поиска",
-        ),
-        BotCommand(
-            command="store",
-            description="Выбрать торговую точку",
         ),
         BotCommand(
             command="subscriptions",
