@@ -25,6 +25,7 @@ from aiogram.types import (
 from fastapi import FastAPI, Header, HTTPException, Request
 
 from connectors.google_search import (
+    PREFERRED_RETAILERS,
     STORE_SELECTION_RETAILERS,
     search_retailer_web,
 )
@@ -1727,18 +1728,27 @@ async def message_handler(
     # ========================================================
 
     filtered_results.sort(
-
-        key=lambda item:
-        item["numeric_price"]
-
+        key=lambda item: item["numeric_price"]
     )
-
-
-    filtered_results = (
-        cheapest_offer_per_retailer(
-            filtered_results
-        )[:10]
+    filtered_results = cheapest_offer_per_retailer(
+        filtered_results
     )
+    lowest_offer = min(
+        filtered_results,
+        key=lambda item: item["numeric_price"],
+    )
+    filtered_results.sort(
+        key=lambda item: (
+            0
+            if format_retailer_name(
+                item.get("store"),
+                item.get("link"),
+            ) in PREFERRED_RETAILERS
+            else 1,
+            item["numeric_price"],
+        )
+    )
+    filtered_results = filtered_results[:10]
 
 
     # ========================================================
@@ -2137,12 +2147,7 @@ async def message_handler(
                     " — цена зависит от магазина"
                 )
 
-    lowest_price = (
-
-        filtered_results[0]
-        ["numeric_price"]
-
-    )
+    lowest_price = lowest_offer["numeric_price"]
 
     watch_token = None
 
@@ -2179,7 +2184,7 @@ async def message_handler(
             )
 
 
-    lowest_link = filtered_results[0].get(
+    lowest_link = lowest_offer.get(
         "link"
     )
 
