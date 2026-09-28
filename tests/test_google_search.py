@@ -3,6 +3,7 @@ import unittest
 from connectors.google_search import (
     _extract_price,
     _is_product_link,
+    _retailer_search_hint,
     _retailer_name,
 )
 
@@ -57,6 +58,59 @@ class GoogleSearchConnectorTests(unittest.TestCase):
                 "https://market.yandex.ru/search?text=nolinskie"
             )
         )
+
+    def test_accepts_direct_marketplace_cards(self):
+        self.assertTrue(
+            _is_product_link(
+                "https://www.ozon.ru/product/iphone-17-pro-123456/"
+            )
+        )
+        self.assertTrue(
+            _is_product_link(
+                "https://www.wildberries.ru/catalog/123456/detail.aspx"
+            )
+        )
+
+    def test_rejects_marketplace_search_pages(self):
+        self.assertFalse(
+            _is_product_link(
+                "https://www.ozon.ru/search/?text=iphone"
+            )
+        )
+        self.assertFalse(
+            _is_product_link(
+                "https://www.wildberries.ru/catalog/0/search.aspx"
+            )
+        )
+
+    def test_accepts_kb_product_and_rejects_category(self):
+        self.assertTrue(
+            _is_product_link(
+                "https://krasnoeibeloe.ru/catalog/importnoe_pivo/napitok_pivnoy_korona_ekstra/"
+            )
+        )
+        self.assertFalse(
+            _is_product_link(
+                "https://krasnoeibeloe.ru/catalog/importnoe_pivo/"
+            )
+        )
+
+    def test_search_hint_covers_every_supported_retailer(self):
+        hint = _retailer_search_hint()
+        for domain in (
+            "market.yandex.ru",
+            "ozon.ru",
+            "wildberries.ru",
+            "perekrestok.ru",
+            "5ka.ru",
+            "dixy.ru",
+            "magnit.ru",
+            "vkusvill.ru",
+            "av.ru",
+            "winelab.ru",
+            "krasnoeibeloe.ru",
+        ):
+            self.assertIn(f"site:{domain}", hint)
 
 
 if __name__ == "__main__":
