@@ -6,9 +6,11 @@ import requests
 
 SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
+SEARCHAPI_KEY = os.getenv("SEARCHAPI_KEY")
 
 SCRAPEDO_URL = "https://api.scrape.do/plugin/google/shopping"
 SERPAPI_URL = "https://serpapi.com/search.json"
+SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
 
 
 def _fetch_shopping_data(
@@ -72,6 +74,35 @@ def _fetch_shopping_data(
                 f"SerpApi: {type(error).__name__}"
             )
 
+    if SEARCHAPI_KEY:
+        params = {
+            "api_key": SEARCHAPI_KEY,
+            "engine": "google_shopping",
+            "q": query,
+            "hl": "ru",
+            "gl": "ru",
+            "google_domain": "google.ru",
+            "device": "desktop",
+        }
+        if location:
+            params["location"] = location
+
+        try:
+            response = requests.get(
+                SEARCHAPI_URL,
+                params=params,
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("error"):
+                raise RuntimeError(str(data["error"]))
+            return data
+        except Exception as error:
+            errors.append(
+                f"SearchApi: {type(error).__name__}"
+            )
+
     if not errors:
         raise RuntimeError(
             "No shopping search provider is configured"
@@ -88,7 +119,7 @@ def search_google_shopping(
 ) -> list[dict[str, Any]]:
     """
     Ищет товар через основной источник Scrape.do.
-    При его недоступности использует SerpApi.
+    При его недоступности использует SerpApi или SearchApi.
     """
 
     data = _fetch_shopping_data(query, location)

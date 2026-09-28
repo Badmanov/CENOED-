@@ -5,8 +5,10 @@ from urllib.parse import urlparse
 
 SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
+SEARCHAPI_KEY = os.getenv("SEARCHAPI_KEY")
 SCRAPEDO_SEARCH_URL = "https://api.scrape.do/plugin/google/search"
 SERPAPI_SEARCH_URL = "https://serpapi.com/search.json"
+SEARCHAPI_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
 
 
 # ============================================================
@@ -409,6 +411,35 @@ def search_retailer_web(
         except Exception as error:
             errors.append(
                 f"SerpApi: {type(error).__name__}"
+            )
+
+    if data is None and SEARCHAPI_KEY:
+        params = {
+            "api_key": SEARCHAPI_KEY,
+            "engine": "google",
+            "q": search_text,
+            "hl": "ru",
+            "gl": "ru",
+            "google_domain": "google.ru",
+            "device": "desktop",
+        }
+        if location:
+            params["location"] = location
+
+        try:
+            response = requests.get(
+                SEARCHAPI_SEARCH_URL,
+                params=params,
+                timeout=60,
+            )
+            response.raise_for_status()
+            candidate = response.json()
+            if candidate.get("error"):
+                raise RuntimeError(str(candidate["error"]))
+            data = candidate
+        except Exception as error:
+            errors.append(
+                f"SearchApi: {type(error).__name__}"
             )
 
     if data is None:
