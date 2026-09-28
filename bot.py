@@ -288,6 +288,118 @@ def cheapest_offer_per_retailer(
     return unique_offers
 
 
+def store_selection_matches(
+    offers: list[dict[str, Any]],
+    user_query: str,
+) -> list[dict[str, Any]]:
+    matches = []
+    fallback_query = build_fallback_search_query(
+        user_query
+    )
+    requested_pack = extract_pack_count(
+        user_query
+    )
+
+    for offer in offers:
+        if not offer.get("price_requires_store"):
+            continue
+
+        match_text = (
+            offer.get("match_text")
+            or offer.get("title")
+            or ""
+        )
+        matching_offer = dict(offer)
+        matching_offer["title"] = match_text
+
+        try:
+            relevant = is_relevant_result(
+                user_query,
+                matching_offer,
+            )
+        except Exception:
+            relevant = False
+
+        if (
+            not relevant
+            and requested_pack
+            and fallback_query
+        ):
+            try:
+                relevant = is_relevant_result(
+                    fallback_query,
+                    matching_offer,
+                )
+            except Exception:
+                relevant = False
+
+        if relevant:
+            matches.append(offer)
+
+    return cheapest_offer_per_retailer(
+        matches
+    )
+
+
+def format_store_selection_notice(
+    user_query: str,
+    user_city: str | None,
+    offers: list[dict[str, Any]],
+) -> str:
+    lines = [
+        "🦖 <b>Товар нашёл, но цена зависит от магазина.</b>",
+        "",
+        f"🔎 <b>{html.escape(user_query)}</b>",
+        f"📍 {html.escape(user_city or 'Город не указан')}",
+        "",
+    ]
+
+    for offer in offers[:5]:
+        store = format_retailer_name(
+            offer.get("store"),
+            offer.get("link"),
+        )
+        title = str(
+            offer.get("title")
+            or "Товар"
+        ).strip()
+        link = str(
+            offer.get("link")
+            or ""
+        ).strip()
+
+        if link:
+            store_label = (
+                f'<a href="{html.escape(link, quote=True)}">'
+                f"<b>{html.escape(store)}</b>"
+                "</a>"
+            )
+        else:
+            store_label = f"<b>{html.escape(store)}</b>"
+
+        lines.append(
+            f"🛒 {store_label}\n"
+            f"   {html.escape(title)}"
+        )
+        lines.append("")
+
+    lines.extend(
+        (
+            "Магазин показывает актуальную цену только "
+            "после выбора конкретной торговой точки.",
+            "ЦЕНОЕД не подставляет примерную или устаревшую цену.",
+        )
+    )
+
+    if extract_pack_count(user_query):
+        lines.append(
+            "Количество в упаковке и итоговую стоимость "
+            "проверьте в карточке магазина."
+        )
+
+    return "\n".join(lines)
+
+
 def format_history_datetime(
     value: Any,
 ) -> str | None:
@@ -1101,6 +1213,14 @@ async def message_handler(
         return
 
 
+    store_selection_offers = (
+        store_selection_matches(
+            results,
+            user_query,
+        )
+    )
+
+
     # ========================================================
     # PRICE FILTER
     # ========================================================
@@ -1141,6 +1261,22 @@ async def message_handler(
 
 
     if not results_with_price:
+
+        if store_selection_offers:
+
+            await status_message.edit_text(
+
+                format_store_selection_notice(
+                    user_query,
+                    user_city,
+                    store_selection_offers,
+                ),
+
+                disable_web_page_preview=True,
+
+            )
+
+            return
 
         await status_message.edit_text(
 
@@ -1254,6 +1390,22 @@ async def message_handler(
     # ========================================================
 
     if not filtered_results:
+
+        if store_selection_offers:
+
+            await status_message.edit_text(
+
+                format_store_selection_notice(
+                    user_query,
+                    user_city,
+                    store_selection_offers,
+                ),
+
+                disable_web_page_preview=True,
+
+            )
+
+            return
 
         await status_message.edit_text(
 
