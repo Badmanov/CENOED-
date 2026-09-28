@@ -24,7 +24,10 @@ from aiogram.types import (
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
-from connectors.google_search import search_retailer_web
+from connectors.google_search import (
+    STORE_SELECTION_RETAILERS,
+    search_retailer_web,
+)
 from connectors.google_shopping import search_google_shopping
 from location_profile import compose_search_location
 from product_matching import (
@@ -361,7 +364,7 @@ def format_store_selection_notice(
         format_retailer_name(
             offer.get("store"),
             offer.get("link"),
-        ) == "🔞 Красное & Белое"
+        ) in STORE_SELECTION_RETAILERS
         for offer in offers
     )
     lines = [
@@ -412,8 +415,8 @@ def format_store_selection_notice(
     if site_only_selection:
         lines.extend(
             (
-                "Красное & Белое выбирает торговую точку "
-                "отдельно на своём сайте.",
+                "Этот магазин выбирает торговую точку "
+                "отдельно на своём сайте или в приложении.",
                 "Нажми кнопку ниже и укажи магазин на сайте — "
                 "после этого появится его актуальная цена.",
                 "ЦЕНОЕД не может перенести выбор между двумя "
@@ -456,7 +459,7 @@ def store_selection_keyboard(
             offer.get("link"),
         )
         link = str(offer.get("link") or "").strip()
-        if store == "🔞 Красное & Белое" and link:
+        if store in STORE_SELECTION_RETAILERS and link:
             return InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
