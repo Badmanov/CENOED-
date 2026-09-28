@@ -5,6 +5,7 @@ from connectors.google_search import (
     _is_product_link,
     _retailer_search_hint,
     _retailer_name,
+    STORE_SELECTION_RETAILERS,
 )
 
 
@@ -111,6 +112,20 @@ class GoogleSearchConnectorTests(unittest.TestCase):
             "krasnoeibeloe.ru",
         ):
             self.assertIn(f"site:{domain}", hint)
+
+    def test_store_selection_retailers_are_explicit(self):
+        self.assertIn(
+            "🔞 Красное & Белое",
+            STORE_SELECTION_RETAILERS,
+        )
+        self.assertIn(
+            "🟢 Пятёрочка",
+            STORE_SELECTION_RETAILERS,
+        )
+        self.assertNotIn(
+            "🟦 Ozon",
+            STORE_SELECTION_RETAILERS,
+        )
 
 
 if __name__ == "__main__":
