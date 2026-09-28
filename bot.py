@@ -1872,11 +1872,6 @@ async def message_handler(
 
     ]
 
-    if user_store_location:
-        lines.append(
-            f"🏪 {html.escape(user_store_location)}"
-        )
-
 
     max_discount = None
 
@@ -2065,8 +2060,86 @@ async def message_handler(
 
 
     # ========================================================
-    # LOWEST PRICE
+    # LARGE GROCERY RETAILERS WITHOUT A DISPLAYED PRICE
     # ========================================================
+
+    grocery_retailers = (
+        (
+            "🟢 Пятёрочка",
+            "https://5ka.ru/",
+        ),
+        (
+            "🟢 Перекрёсток",
+            "https://www.perekrestok.ru/",
+        ),
+        (
+            "🔴 Магнит",
+            "https://magnit.ru/",
+        ),
+        (
+            "🟠 Дикси",
+            "https://dixy.ru/",
+        ),
+        (
+            "🟡 Чижик",
+            "https://chizhik.club/",
+        ),
+        (
+            "🔴 Светофор",
+            "https://svetoforonline.ru/",
+        ),
+    )
+
+    displayed_retailers = set()
+
+    for item in filtered_results:
+        displayed_retailers.add(
+            format_retailer_name(
+                item.get("store"),
+                item.get("link"),
+            )
+        )
+
+    # Показываем дополнительный блок только для продуктового
+    # поиска, когда хотя бы одна крупная продуктовая сеть
+    # уже была найдена среди релевантных результатов.
+    grocery_search = any(
+        retailer_name in displayed_retailers
+        for retailer_name, _ in grocery_retailers
+    )
+
+    if grocery_search:
+
+        missing_grocery_retailers = [
+            (retailer_name, retailer_url)
+            for retailer_name, retailer_url
+            in grocery_retailers
+            if retailer_name not in displayed_retailers
+        ]
+
+        if missing_grocery_retailers:
+
+            lines.append("")
+            lines.append(
+                "🏪 <b>Проверить цену в крупных сетях:</b>"
+            )
+
+            for (
+                retailer_name,
+                retailer_url,
+            ) in missing_grocery_retailers:
+
+                safe_url = html.escape(
+                    retailer_url,
+                    quote=True,
+                )
+
+                lines.append(
+                    f'• <a href="{safe_url}">'
+                    f"{html.escape(retailer_name)}"
+                    "</a>"
+                    " — цена зависит от магазина"
+                )
 
     lowest_price = (
 
