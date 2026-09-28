@@ -4,9 +4,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
-SCRAPEDO_SEARCH_URL = (
-    "https://api.scrape.do/plugin/google/search"
-)
+SCRAPEDO_SEARCH_URL = "https://api.scrape.do/plugin/google/search"
 
 
 # ============================================================
@@ -64,20 +62,6 @@ STORE_SELECTION_RETAILERS = {
 }
 
 
-# Крупные продуктовые сети, которые хотим проверять
-# в первую очередь для продуктовых запросов.
-GROCERY_RETAILERS = (
-    ("perekrestok.ru", "🟢 Перекрёсток"),
-    ("5ka.ru", "🟢 Пятёрочка"),
-    ("magnit.ru", "🔴 Магнит"),
-    ("dixy.ru", "🟠 Дикси"),
-    ("chizhik.club", "🟡 Чижик"),
-    ("svetoforonline.ru", "🔴 Светофор"),
-    ("vkusvill.ru", "🟢 ВкусВилл"),
-    ("av.ru", "🟣 Азбука Вкуса"),
-)
-
-
 PRICE_PATTERN = re.compile(
     r"(?<!\d)"
     r"(\d{1,3}(?:[ \u00a0]\d{3})*|\d+)"
@@ -124,9 +108,7 @@ def _extract_price(
         )
     )
 
-    match = PRICE_PATTERN.search(
-        searchable
-    )
+    match = PRICE_PATTERN.search(searchable)
 
     if not match:
         return None
@@ -159,7 +141,6 @@ def _retailer_name(
     ).casefold()
 
     for markers, name in RETAILER_DOMAINS:
-
         if any(
             marker in hostname
             for marker in markers
@@ -184,7 +165,6 @@ def _is_product_link(
 
 
     if "market.yandex" in hostname:
-
         return (
             path.startswith("/card/")
             or path.startswith("/product/")
@@ -193,7 +173,6 @@ def _is_product_link(
 
 
     if "ozon.ru" in hostname:
-
         return "/product/" in path
 
 
@@ -202,7 +181,6 @@ def _is_product_link(
         or hostname == "wb.ru"
         or hostname.endswith(".wb.ru")
     ):
-
         return bool(
             re.search(
                 r"/catalog/\d+/detail\.aspx/?$",
@@ -212,7 +190,6 @@ def _is_product_link(
 
 
     if "krasnoeibeloe.ru" in hostname:
-
         return bool(
             re.match(
                 r"^/catalog/[^/]+/[^/]+/?$",
@@ -258,13 +235,7 @@ def _is_product_link(
     for domain, markers in (
         product_path_markers.items()
     ):
-
         if domain in hostname:
-
-            # Для части продуктовых сетей Google может
-            # вернуть полезную индексируемую страницу без
-            # стандартного пути карточки. Не отбрасываем
-            # непустые страницы полностью.
             return (
                 any(
                     marker in path
@@ -285,9 +256,7 @@ def _retailer_search_hint() -> str:
         in RETAILER_SEARCH_DOMAINS
     )
 
-    return (
-        f"цена купить ({scopes})"
-    )
+    return f"цена купить ({scopes})"
 
 
 def _build_offer(
@@ -302,9 +271,7 @@ def _build_offer(
     if not link:
         return None
 
-    retailer = _retailer_name(
-        link
-    )
+    retailer = _retailer_name(link)
 
     if not retailer:
         return None
@@ -312,9 +279,7 @@ def _build_offer(
     if not _is_product_link(link):
         return None
 
-    price = _extract_price(
-        result
-    )
+    price = _extract_price(result)
 
     price_requires_store = (
         price is None
@@ -368,33 +333,11 @@ def _build_offer(
     }
 
 
-def _organic_results(
-    data: dict[str, Any],
-) -> list[dict[str, Any]]:
-
-    raw_results = data.get(
-        "organic_results",
-        [],
-    )
-
-    if not isinstance(
-        raw_results,
-        list,
-    ):
-        return []
-
-    return [
-        item
-        for item in raw_results
-        if isinstance(item, dict)
-    ]
-
-
 # ============================================================
-# GOOGLE WEB SEARCH
+# RETAILER SEARCH
 # ============================================================
 
-def _run_google_search(
+def search_retailer_web(
     query: str,
     location: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -402,14 +345,15 @@ def _run_google_search(
     import requests
 
     if not SCRAPEDO_TOKEN:
-
         raise RuntimeError(
             "SCRAPEDO_TOKEN is not set"
         )
 
+    retailer_hint = _retailer_search_hint()
+
     params = {
         "token": SCRAPEDO_TOKEN,
-        "q": query,
+        "q": f"{query} {retailer_hint}",
         "hl": "ru",
         "gl": "ru",
         "google_domain": "google.ru",
@@ -430,43 +374,24 @@ def _run_google_search(
 
     data = response.json()
 
-    return _organic_results(
-        data
+    raw_results = data.get(
+        "organic_results",
+        [],
     )
 
+    if not isinstance(raw_results, list):
+        return []
 
-# ============================================================
-# RETAILER SEARCH
-# ============================================================
-
-def search_retailer_web(
-    query: str,
-    location: str | None = None,
-) -> list[dict[str, Any]]:
-
-    retailer_hint = (
-        _retailer_search_hint()
-    )
-
-    organic_results = (
-        _run_google_search(
-            f"{query} {retailer_hint}",
-            location,
-        )
-    )
-
-    offers: list[
-        dict[str, Any]
-    ] = []
-
-    seen = set()
+    offers: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
 
 
-    for result in organic_results:
+    for result in raw_results:
 
-        offer = _build_offer(
-            result
-        )
+        if not isinstance(result, dict):
+            continue
+
+        offer = _build_offer(result)
 
         if offer is None:
             continue
@@ -480,122 +405,7 @@ def search_retailer_web(
             continue
 
         seen.add(identity)
-
-        offers.append(
-            offer
-        )
-
-
-    # --------------------------------------------------------
-    # EXTRA GROCERY SEARCH
-    # --------------------------------------------------------
-    #
-    # Google не всегда возвращает все продуктовые сети,
-    # если объединить много site: операторов в один запрос.
-    # Поэтому отдельно проверяем крупные продуктовые сети,
-    # которых нет в общей выдаче.
-    #
-    # Цена при этом НЕ придумывается. Если сеть не публикует
-    # цену без выбора магазина, результат будет отмечен
-    # price_requires_store=True.
-    # --------------------------------------------------------
-
-    found_retailers = {
-        str(
-            offer.get("store")
-            or ""
-        )
-        for offer in offers
-    }
-
-
-    for domain, retailer_name in (
-        GROCERY_RETAILERS
-    ):
-
-        if retailer_name in found_retailers:
-            continue
-
-        try:
-
-            retailer_results = (
-                _run_google_search(
-                    (
-                        f"{query} "
-                        f"site:{domain}"
-                    ),
-                    location,
-                )
-            )
-
-        except Exception as error:
-
-            print(
-                "GROCERY RETAILER SEARCH ERROR: "
-                f"{retailer_name}: "
-                f"{type(error).__name__}: "
-                f"{error}",
-                flush=True,
-            )
-
-            continue
-
-
-        retailer_offer = None
-
-
-        for result in retailer_results:
-
-            offer = _build_offer(
-                result
-            )
-
-            if offer is None:
-                continue
-
-            if (
-                offer.get("store")
-                != retailer_name
-            ):
-                continue
-
-            retailer_offer = offer
-            break
-
-
-        if retailer_offer is None:
-            continue
-
-
-        identity = (
-            str(
-                retailer_offer.get(
-                    "store"
-                )
-                or ""
-            ),
-            str(
-                retailer_offer.get(
-                    "link"
-                )
-                or ""
-            ),
-        )
-
-
-        if identity in seen:
-            continue
-
-
-        seen.add(identity)
-
-        offers.append(
-            retailer_offer
-        )
-
-        found_retailers.add(
-            retailer_name
-        )
+        offers.append(offer)
 
 
     return offers
