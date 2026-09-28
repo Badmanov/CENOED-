@@ -357,6 +357,13 @@ def format_store_selection_notice(
     offers: list[dict[str, Any]],
     user_store_location: str | None = None,
 ) -> str:
+    site_only_selection = any(
+        format_retailer_name(
+            offer.get("store"),
+            offer.get("link"),
+        ) == "🔞 Красное & Белое"
+        for offer in offers
+    )
     lines = [
         "🦖 <b>Товар нашёл, но цена зависит от магазина.</b>",
         "",
@@ -365,7 +372,7 @@ def format_store_selection_notice(
         "",
     ]
 
-    if user_store_location:
+    if user_store_location and not site_only_selection:
         lines.extend(
             (
                 f"🏪 {html.escape(user_store_location)}",
@@ -402,7 +409,18 @@ def format_store_selection_notice(
         )
         lines.append("")
 
-    if user_store_location:
+    if site_only_selection:
+        lines.extend(
+            (
+                "Красное & Белое выбирает торговую точку "
+                "отдельно на своём сайте.",
+                "Нажми кнопку ниже и укажи магазин на сайте — "
+                "после этого появится его актуальная цена.",
+                "ЦЕНОЕД не может перенести выбор между двумя "
+                "разными сайтами и не подставляет устаревшую цену.",
+            )
+        )
+    elif user_store_location:
         lines.extend(
             (
                 "Торговая точка выбрана. Нажми кнопку ниже, "
@@ -432,6 +450,24 @@ def store_selection_keyboard(
     offers: list[dict[str, Any]] | None = None,
     user_store_location: str | None = None,
 ) -> InlineKeyboardMarkup:
+    for offer in offers or []:
+        store = format_retailer_name(
+            offer.get("store"),
+            offer.get("link"),
+        )
+        link = str(offer.get("link") or "").strip()
+        if store == "🔞 Красное & Белое" and link:
+            return InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🛒 Открыть сайт и выбрать магазин",
+                            url=link,
+                        )
+                    ]
+                ]
+            )
+
     if user_store_location:
         for offer in offers or []:
             link = str(offer.get("link") or "").strip()
