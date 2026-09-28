@@ -402,13 +402,22 @@ def format_store_selection_notice(
         )
         lines.append("")
 
-    lines.extend(
-        (
-            "Магазин показывает актуальную цену только "
-            "после выбора конкретной торговой точки.",
-            "ЦЕНОЕД не подставляет примерную или устаревшую цену.",
+    if user_store_location:
+        lines.extend(
+            (
+                "Торговая точка выбрана. Нажми кнопку ниже, "
+                "чтобы открыть товар и увидеть актуальную цену магазина.",
+                "ЦЕНОЕД не подставляет примерную или устаревшую цену.",
+            )
         )
-    )
+    else:
+        lines.extend(
+            (
+                "Магазин показывает актуальную цену только "
+                "после выбора конкретной торговой точки.",
+                "ЦЕНОЕД не подставляет примерную или устаревшую цену.",
+            )
+        )
 
     if extract_pack_count(user_query):
         lines.append(
@@ -419,7 +428,31 @@ def format_store_selection_notice(
     return "\n".join(lines)
 
 
-def store_selection_keyboard() -> InlineKeyboardMarkup:
+def store_selection_keyboard(
+    offers: list[dict[str, Any]] | None = None,
+    user_store_location: str | None = None,
+) -> InlineKeyboardMarkup:
+    if user_store_location:
+        for offer in offers or []:
+            link = str(offer.get("link") or "").strip()
+            if link:
+                return InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🛒 Открыть товар в магазине",
+                                url=link,
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="🏪 Изменить магазин",
+                                callback_data="store_help",
+                            )
+                        ],
+                    ]
+                )
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -1494,7 +1527,10 @@ async def message_handler(
 
                 disable_web_page_preview=True,
 
-                reply_markup=store_selection_keyboard(),
+                reply_markup=store_selection_keyboard(
+                    store_selection_offers,
+                    user_store_location,
+                ),
 
             )
 
@@ -1626,7 +1662,10 @@ async def message_handler(
 
                 disable_web_page_preview=True,
 
-                reply_markup=store_selection_keyboard(),
+                reply_markup=store_selection_keyboard(
+                    store_selection_offers,
+                    user_store_location,
+                ),
 
             )
 
