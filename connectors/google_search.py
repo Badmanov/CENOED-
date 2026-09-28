@@ -39,6 +39,17 @@ RETAILER_SEARCH_DOMAINS = (
     "krasnoeibeloe.ru",
 )
 
+STORE_SELECTION_RETAILERS = {
+    "🔞 ВинЛаб",
+    "🔞 Красное & Белое",
+    "🟢 Перекрёсток",
+    "🟢 Пятёрочка",
+    "🟠 Дикси",
+    "🔴 Магнит",
+    "🟢 ВкусВилл",
+    "🟣 Азбука Вкуса",
+}
+
 PRICE_PATTERN = re.compile(
     r"(?<!\d)"
     r"(\d{1,3}(?:[ \u00a0]\d{3})*|\d+)"
@@ -226,8 +237,16 @@ def search_retailer_web(
             not link
             or not retailer
             or not _is_product_link(link)
-            or price is None
         ):
+            continue
+
+        price_requires_store = (
+            price is None
+            and retailer
+            in STORE_SELECTION_RETAILERS
+        )
+
+        if price is None and not price_requires_store:
             continue
 
         title = str(result.get("title") or "").strip()
@@ -252,6 +271,9 @@ def search_retailer_web(
                 "delivery": None,
                 "extensions": [],
                 "web_search_result": True,
+                "price_requires_store": (
+                    price_requires_store
+                ),
             }
         )
 
