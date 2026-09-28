@@ -6,6 +6,8 @@ from typing import Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+from location_profile import normalize_store_location
+
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -30,6 +32,7 @@ def init_subscriptions() -> None:
                         product_query TEXT NOT NULL,
                         search_query TEXT NOT NULL,
                         city TEXT NOT NULL DEFAULT 'Москва, Россия',
+                        store_location TEXT,
                         baseline_price NUMERIC(14, 2) NOT NULL,
                         last_seen_price NUMERIC(14, 2) NOT NULL,
                         last_notified_price NUMERIC(14, 2),
@@ -58,6 +61,7 @@ def init_subscriptions() -> None:
                         search_query TEXT NOT NULL,
                         current_price NUMERIC(14, 2) NOT NULL,
                         city TEXT NOT NULL DEFAULT 'Москва, Россия',
+                        store_location TEXT,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     );
                     """
@@ -88,9 +92,28 @@ def init_subscriptions() -> None:
                     CREATE TABLE IF NOT EXISTS user_profiles (
                         telegram_user_id BIGINT PRIMARY KEY,
                         city TEXT NOT NULL,
+                        store_location TEXT,
                         adult_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     );
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE user_profiles
+                    ADD COLUMN IF NOT EXISTS store_location TEXT;
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE price_subscriptions
+                    ADD COLUMN IF NOT EXISTS store_location TEXT;
+                    """
+                )
+                cursor.execute(
+                    """
+                    ALTER TABLE subscription_candidates
+                    ADD COLUMN IF NOT EXISTS store_location TEXT;
                     """
                 )
                 cursor.execute(
@@ -111,6 +134,7 @@ def create_watch_candidate(
     search_query: str,
     current_price: float,
     city: str,
+    store_location: str | None = None,
 ) -> str:
     token = secrets.token_urlsafe(8)
     connection = get_connection()
@@ -132,9 +156,10 @@ def create_watch_candidate(
                         product_query,
                         search_query,
                         current_price,
-                        city
+                        city,
+                        store_location
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
                     """,
                     (
                         token,
@@ -144,6 +169,7 @@ def create_watch_candidate(
                         search_query,
                         current_price,
                         city,
+                        store_location,
                     ),
                 )
         return token
@@ -183,17 +209,19 @@ def activate_subscription(
                         product_query,
                         search_query,
                         city,
+                        store_location,
                         baseline_price,
                         last_seen_price,
                         active,
                         updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, TRUE, NOW())
                     ON CONFLICT (telegram_user_id, product_query)
                     DO UPDATE SET
                         chat_id = EXCLUDED.chat_id,
                         search_query = EXCLUDED.search_query,
                         city = EXCLUDED.city,
+                        store_location = EXCLUDED.store_location,
                         baseline_price = EXCLUDED.baseline_price,
                         last_seen_price = EXCLUDED.last_seen_price,
                         last_notified_price = NULL,
@@ -208,6 +236,7 @@ def activate_subscription(
                         candidate["product_query"],
                         candidate["search_query"],
                         candidate["city"],
+                        candidate.get("store_location"),
                         candidate["current_price"],
                         candidate["current_price"],
                     ),
@@ -403,6 +432,83 @@ def get_user_city(
             if row and row[0]:
                 return str(row[0])
             return "Москва, Россия"
+    finally:
+        connection.close()
+
+
+def set_user_store_location(
+    telegram_user_id: int,
+    store_location: str,
+) -> str:
+    normalized = normalize_store_location(store_location)
+    if len(normalized) < 4 or len(normalized) > 160:
+        raise ValueError("Invalid store location")
+
+    connection = get_connection()
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO user_profiles (
+                        telegram_user_id,
+                        city,
+                        store_location,
+                        updated_at
+                    )
+                    VALUES (%s, 'Москва, Россия', %s, NOW())
+                    ON CONFLICT (telegram_user_id)
+                    DO UPDATE SET
+                        store_location = EXCLUDED.store_location,
+                        updated_at = NOW();
+                    """,
+                    (telegram_user_id, normalized),
+                )
+        return normalized
+    finally:
+        connection.close()
+
+
+def get_user_store_location(
+    telegram_user_id: int,
+) -> str | None:
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT store_location
+                FROM user_profiles
+                WHERE telegram_user_id = %s;
+                """,
+                (telegram_user_id,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                return str(row[0])
+            return None
+    finally:
+        connection.close()
+
+
+def clear_user_store_location(
+    telegram_user_id: int,
+) -> bool:
+    connection = get_connection()
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE user_profiles
+                    SET store_location = NULL,
+                        updated_at = NOW()
+                    WHERE telegram_user_id = %s
+                      AND store_location IS NOT NULL;
+                    """,
+                    (telegram_user_id,),
+                )
+                return cursor.rowcount > 0
     finally:
         connection.close()
 

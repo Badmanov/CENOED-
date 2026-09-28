@@ -24,6 +24,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 
 from connectors.google_search import search_retailer_web
 from connectors.google_shopping import search_google_shopping
+from location_profile import compose_search_location
 from product_matching import (
     extract_pack_count,
     is_relevant_result,
@@ -45,10 +46,13 @@ from subscriptions import (
     list_subscriptions,
     get_due_subscriptions,
     get_user_city,
+    get_user_store_location,
     is_adult_confirmed,
     confirm_adult,
     record_price_check,
     set_user_city,
+    set_user_store_location,
+    clear_user_store_location,
     should_notify,
 )
 
@@ -345,6 +349,7 @@ def format_store_selection_notice(
     user_query: str,
     user_city: str | None,
     offers: list[dict[str, Any]],
+    user_store_location: str | None = None,
 ) -> str:
     lines = [
         "🦖 <b>Товар нашёл, но цена зависит от магазина.</b>",
@@ -353,6 +358,14 @@ def format_store_selection_notice(
         f"📍 {html.escape(user_city or 'Город не указан')}",
         "",
     ]
+
+    if user_store_location:
+        lines.extend(
+            (
+                f"🏪 {html.escape(user_store_location)}",
+                "",
+            )
+        )
 
     for offer in offers[:5]:
         store = format_retailer_name(
@@ -671,6 +684,7 @@ async def start_handler(
         "• Чехол iPhone 17 Pro\n\n"
 
         "📍 Город поиска: команда /city\n"
+        "🏪 Торговая точка: команда /store\n"
         "🔔 Подписки: команда /subscriptions\n\n"
         "🦖 Отправляй товар — "
         "отправлю Ценоеда на охоту!"
@@ -745,6 +759,85 @@ async def city_handler(message: Message):
     )
 
 
+@dp.message(Command("store"))
+async def store_handler(message: Message):
+    if not message.from_user:
+        return
+
+    raw_location = ""
+    if message.text:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) > 1:
+            raw_location = parts[1].strip()
+
+    if not raw_location:
+        try:
+            current = await asyncio.to_thread(
+                get_user_store_location,
+                message.from_user.id,
+            )
+        except Exception:
+            current = None
+
+        current_text = (
+            html.escape(current)
+            if current
+            else "не выбрана"
+        )
+        await message.answer(
+            "🏪 <b>Торговая точка</b>\n\n"
+            f"Сейчас: {current_text}\n\n"
+            "Укажи сеть и адрес или ближайшее метро, например:\n"
+            "<code>/store Красное &amp; Белое, ул. Тверская, 12</code>\n\n"
+            "Убрать привязку: <code>/store off</code>"
+        )
+        return
+
+    if raw_location.casefold() in {"off", "нет", "удалить", "сбросить"}:
+        try:
+            await asyncio.to_thread(
+                clear_user_store_location,
+                message.from_user.id,
+            )
+        except Exception:
+            await message.answer(
+                "🏪 Не удалось убрать торговую точку. Попробуй позже."
+            )
+            return
+        await message.answer(
+            "🏪 Привязка к торговой точке отключена."
+        )
+        return
+
+    try:
+        saved = await asyncio.to_thread(
+            set_user_store_location,
+            message.from_user.id,
+            raw_location,
+        )
+    except (ValueError, TypeError):
+        await message.answer(
+            "🏪 Укажи сеть и адрес подробнее после /store."
+        )
+        return
+    except Exception as e:
+        print(
+            f"STORE SAVE ERROR: {type(e).__name__}: {e}",
+            flush=True,
+        )
+        await message.answer(
+            "🏪 Не удалось сохранить торговую точку. Попробуй позже."
+        )
+        return
+
+    await message.answer(
+        "🏪 <b>Торговая точка сохранена</b>\n\n"
+        f"{html.escape(saved)}\n\n"
+        "ЦЕНОЕД будет учитывать её в новых поисках. "
+        "Точная цена появится, если магазин публикует её для этой точки."
+    )
+
+
 # ============================================================
 # SUBSCRIPTIONS
 # ============================================================
@@ -815,6 +908,24 @@ async def city_help_callback(
             "Отправь команду с названием города, например:\n"
             "<code>/city Санкт-Петербург</code>\n\n"
             "Текущий город можно посмотреть командой /city."
+        )
+
+
+@dp.callback_query(
+    lambda query:
+    query.data == "store_help"
+)
+async def store_help_callback(
+    callback: CallbackQuery,
+):
+    await callback.answer()
+
+    if callback.message:
+        await callback.message.answer(
+            "🏪 <b>Как выбрать торговую точку</b>\n\n"
+            "Отправь сеть и адрес или ближайшее метро, например:\n"
+            "<code>/store Красное &amp; Белое, ул. Тверская, 12</code>\n\n"
+            "Текущую точку можно посмотреть командой /store."
         )
 
 
@@ -1007,9 +1118,23 @@ async def message_handler(
 
             user_city = "Москва, Россия"
 
+        try:
+            user_store_location = await asyncio.to_thread(
+                get_user_store_location,
+                message.from_user.id,
+            )
+        except Exception:
+            user_store_location = None
+
     else:
 
         user_city = "Москва, Россия"
+        user_store_location = None
+
+    search_location = compose_search_location(
+        user_city,
+        user_store_location,
+    )
 
 
     if len(user_query) < 2:
@@ -1120,7 +1245,7 @@ async def message_handler(
 
             search_query,
 
-            user_city,
+            search_location,
 
         )
 
@@ -1147,37 +1272,42 @@ async def message_handler(
 
                     fallback_query,
 
-                    user_city,
+                    search_location,
 
                 )
 
                 if results:
                     search_query = fallback_query
 
-        if is_age_restricted_query(
-            user_query
-        ):
-            web_query = (
-                build_fallback_search_query(
-                    user_query
-                )
+        web_query = (
+            build_fallback_search_query(
+                user_query
             )
+        )
+        try:
             web_results = await asyncio.to_thread(
 
                 search_retailer_web,
 
                 web_query,
 
-                user_city,
+                search_location,
 
             )
+        except Exception as web_error:
+            print(
+                f"RETAILER SEARCH ERROR: "
+                f"{type(web_error).__name__}: {web_error}",
+                flush=True,
+            )
+            web_results = []
 
-            if web_results:
-                if results:
-                    results.extend(web_results)
-                else:
-                    results = web_results
-                    search_query = web_query
+        if web_results:
+            if results:
+                results.extend(web_results)
+            else:
+                results = web_results
+                search_query = web_query
 
     except Exception as e:
 
@@ -1270,6 +1400,7 @@ async def message_handler(
                     user_query,
                     user_city,
                     store_selection_offers,
+                    user_store_location,
                 ),
 
                 disable_web_page_preview=True,
@@ -1399,6 +1530,7 @@ async def message_handler(
                     user_query,
                     user_city,
                     store_selection_offers,
+                    user_store_location,
                 ),
 
                 disable_web_page_preview=True,
@@ -1568,6 +1700,11 @@ async def message_handler(
         "",
 
     ]
+
+    if user_store_location:
+        lines.append(
+            f"🏪 {html.escape(user_store_location)}"
+        )
 
 
     max_discount = None
@@ -1789,6 +1926,8 @@ async def message_handler(
 
                 user_city,
 
+                user_store_location,
+
             )
 
         except Exception as e:
@@ -1869,6 +2008,12 @@ async def message_handler(
                         callback_data="city_help",
                     )
                 ],
+                [
+                    InlineKeyboardButton(
+                        text="🏪 Выбрать торговую точку",
+                        callback_data="store_help",
+                    )
+                ],
             ]
         )
 
@@ -1891,7 +2036,12 @@ def find_lowest_subscription_offer(
     product_query: str,
     prepared_query: str,
     city: str,
+    store_location: str | None = None,
 ) -> dict[str, Any] | None:
+    search_location = compose_search_location(
+        city,
+        store_location,
+    )
     fallback_query = build_fallback_search_query(
         product_query
     )
@@ -1964,7 +2114,7 @@ def find_lowest_subscription_offer(
 
     results = search_google_shopping(
         prepared_query,
-        city,
+        search_location,
     )
     matching = matching_offers(results)
 
@@ -1975,20 +2125,25 @@ def find_lowest_subscription_offer(
     ):
         fallback_results = search_google_shopping(
             fallback_query,
-            city,
+            search_location,
         )
         matching = matching_offers(
             fallback_results
         )
 
-    if (
-        not matching
-        and is_age_restricted_query(product_query)
-    ):
-        web_results = search_retailer_web(
-            fallback_query or prepared_query,
-            city,
-        )
+    if not matching:
+        try:
+            web_results = search_retailer_web(
+                fallback_query or prepared_query,
+                search_location,
+            )
+        except Exception as web_error:
+            print(
+                f"SUBSCRIPTION RETAILER SEARCH ERROR: "
+                f"{type(web_error).__name__}: {web_error}",
+                flush=True,
+            )
+            web_results = []
         matching = matching_offers(web_results)
 
     if not matching:
@@ -2027,6 +2182,7 @@ async def check_price_subscriptions() -> dict[str, int]:
                 subscription["search_query"],
                 subscription.get("city")
                 or "Москва, Россия",
+                subscription.get("store_location"),
             )
 
             if offer is None:
@@ -2264,6 +2420,10 @@ async def setup_webhook():
         BotCommand(
             command="city",
             description="Выбрать город поиска",
+        ),
+        BotCommand(
+            command="store",
+            description="Выбрать торговую точку",
         ),
         BotCommand(
             command="subscriptions",
