@@ -1042,18 +1042,15 @@ async def message_handler(
                 if results:
                     search_query = fallback_query
 
-        if (
-            not results
-            and is_age_restricted_query(
-                user_query
-            )
+        if is_age_restricted_query(
+            user_query
         ):
             web_query = (
                 build_fallback_search_query(
                     user_query
                 )
             )
-            results = await asyncio.to_thread(
+            web_results = await asyncio.to_thread(
 
                 search_retailer_web,
 
@@ -1063,8 +1060,12 @@ async def message_handler(
 
             )
 
-            if results:
-                search_query = web_query
+            if web_results:
+                if results:
+                    results.extend(web_results)
+                else:
+                    results = web_results
+                    search_query = web_query
 
     except Exception as e:
 
