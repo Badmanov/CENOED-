@@ -34,6 +34,32 @@ class SearchProviderFallbackTests(unittest.TestCase):
         self.assertEqual(reserve_params["engine"], "google_shopping")
         self.assertEqual(reserve_params["api_key"], "reserve")
 
+    @patch("connectors.google_shopping.requests.get")
+    def test_uses_searchapi_without_other_providers(self, request_get):
+        fallback = Mock()
+        fallback.raise_for_status.return_value = None
+        fallback.json.return_value = {"shopping_results": []}
+        request_get.return_value = fallback
+
+        with patch.object(google_shopping, "SCRAPEDO_TOKEN", None), patch.object(
+            google_shopping,
+            "SERPAPI_KEY",
+            None,
+        ), patch.object(
+            google_shopping,
+            "SEARCHAPI_KEY",
+            "reserve",
+        ):
+            data = google_shopping._fetch_shopping_data(
+                "iPhone",
+                "Москва, Россия",
+            )
+
+        self.assertEqual(data, {"shopping_results": []})
+        reserve_params = request_get.call_args.kwargs["params"]
+        self.assertEqual(reserve_params["engine"], "google_shopping")
+        self.assertEqual(reserve_params["api_key"], "reserve")
+
 
 if __name__ == "__main__":
     unittest.main()
