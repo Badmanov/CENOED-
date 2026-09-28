@@ -3,9 +3,6 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
-
-
 SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
 SCRAPEDO_SEARCH_URL = (
     "https://api.scrape.do/plugin/google/search"
@@ -26,6 +23,20 @@ RETAILER_DOMAINS = (
         ("wildberries.ru", "wb.ru"),
         "🟪 Wildberries",
     ),
+)
+
+RETAILER_SEARCH_DOMAINS = (
+    "market.yandex.ru",
+    "ozon.ru",
+    "wildberries.ru",
+    "perekrestok.ru",
+    "5ka.ru",
+    "dixy.ru",
+    "magnit.ru",
+    "vkusvill.ru",
+    "av.ru",
+    "winelab.ru",
+    "krasnoeibeloe.ru",
 )
 
 PRICE_PATTERN = re.compile(
@@ -112,23 +123,66 @@ def _is_product_link(link: str) -> bool:
             or "/product--" in path
         )
 
+    if "ozon.ru" in hostname:
+        return "/product/" in path
+
+    if (
+        "wildberries.ru" in hostname
+        or hostname == "wb.ru"
+        or hostname.endswith(".wb.ru")
+    ):
+        return bool(
+            re.search(
+                r"/catalog/\d+/detail\.aspx/?$",
+                path,
+            )
+        )
+
+    if "krasnoeibeloe.ru" in hostname:
+        return bool(
+            re.match(
+                r"^/catalog/[^/]+/[^/]+/?$",
+                path,
+            )
+        )
+
+    product_path_markers = {
+        "perekrestok.ru": ("/cat/",),
+        "5ka.ru": ("/product/",),
+        "dixy.ru": ("/product/",),
+        "magnit.ru": ("/product/",),
+        "vkusvill.ru": ("/goods/",),
+        "av.ru": ("/product/",),
+        "winelab.ru": ("/product/",),
+    }
+
+    for domain, markers in product_path_markers.items():
+        if domain in hostname:
+            return any(marker in path for marker in markers)
+
     return True
+
+
+def _retailer_search_hint() -> str:
+    scopes = " OR ".join(
+        f"site:{domain}"
+        for domain in RETAILER_SEARCH_DOMAINS
+    )
+    return f"цена купить ({scopes})"
 
 
 def search_retailer_web(
     query: str,
     location: str | None = None,
 ) -> list[dict[str, Any]]:
+    import requests
+
     if not SCRAPEDO_TOKEN:
         raise RuntimeError(
             "SCRAPEDO_TOKEN is not set"
         )
 
-    retailer_hint = (
-        'цена купить '
-        '(ВинЛаб OR "Красное Белое" OR '
-        '"Яндекс Маркет" OR Перекрёсток)'
-    )
+    retailer_hint = _retailer_search_hint()
 
     params = {
         "token": SCRAPEDO_TOKEN,
