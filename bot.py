@@ -1478,12 +1478,10 @@ async def message_handler(
             flush=True,
         )
 
-        await status_message.edit_text(
+                await status_message.edit_text(
 
-            "🦖 Не удалось получить "
-            "результаты поиска.\n\n"
-
-            "Попробуй повторить запрос позже."
+            "🦖 <b>Сейчас не получилось обновить цены.</b>\n\n"
+            "Попробуй ещё раз немного позже."
 
         )
 
