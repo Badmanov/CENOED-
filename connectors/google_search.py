@@ -11,6 +11,16 @@ SERPAPI_SEARCH_URL = "https://serpapi.com/search.json"
 SEARCHAPI_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
 
 
+def _runtime_key(name: str, imported_value: str | None) -> str | None:
+    """Read credentials at request time and ignore accidental whitespace."""
+    value = os.getenv(name)
+    if value is None:
+        value = imported_value
+    if not value:
+        return None
+    return value.strip() or None
+
+
 # ============================================================
 # RETAILERS
 # ============================================================
@@ -357,10 +367,13 @@ def search_retailer_web(
     search_text = f"{query} {retailer_hint}"
     errors: list[str] = []
     data: dict[str, Any] | None = None
+    scrapedo_token = _runtime_key("SCRAPEDO_TOKEN", SCRAPEDO_TOKEN)
+    serpapi_key = _runtime_key("SERPAPI_KEY", SERPAPI_KEY)
+    searchapi_key = _runtime_key("SEARCHAPI_KEY", SEARCHAPI_KEY)
 
-    if SCRAPEDO_TOKEN:
+    if scrapedo_token:
         params = {
-            "token": SCRAPEDO_TOKEN,
+            "token": scrapedo_token,
             "q": search_text,
             "hl": "ru",
             "gl": "ru",
@@ -384,9 +397,9 @@ def search_retailer_web(
                 f"Scrape.do: {type(error).__name__}"
             )
 
-    if data is None and SERPAPI_KEY:
+    if data is None and serpapi_key:
         params = {
-            "api_key": SERPAPI_KEY,
+            "api_key": serpapi_key,
             "engine": "google",
             "q": search_text,
             "hl": "ru",
@@ -413,18 +426,15 @@ def search_retailer_web(
                 f"SerpApi: {type(error).__name__}"
             )
 
-    if data is None and SEARCHAPI_KEY:
+    if data is None and searchapi_key:
         params = {
-            "api_key": SEARCHAPI_KEY,
+            "api_key": searchapi_key,
             "engine": "google",
             "q": search_text,
             "hl": "ru",
             "gl": "ru",
-            "google_domain": "google.ru",
-            "device": "desktop",
+            "link": "resolved",
         }
-        if location:
-            params["location"] = location
 
         try:
             response = requests.get(
