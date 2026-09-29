@@ -7,6 +7,8 @@ from typing import Any
 
 _TABLE_READY = False
 _TABLE_LOCK = threading.Lock()
+_INFLIGHT_LOCK = threading.Lock()
+_INFLIGHT_SEARCHES: dict[str, threading.Event] = {}
 
 
 def _database_url() -> str | None:
@@ -23,6 +25,34 @@ def _cache_key(namespace: str, query: str, location: str | None) -> str:
         )
     )
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def begin_search(
+    namespace: str,
+    query: str,
+    location: str | None,
+) -> tuple[bool, threading.Event]:
+    """Elect one caller to perform an identical external search."""
+    key = _cache_key(namespace, query, location)
+    with _INFLIGHT_LOCK:
+        existing = _INFLIGHT_SEARCHES.get(key)
+        if existing is not None:
+            return False, existing
+        event = threading.Event()
+        _INFLIGHT_SEARCHES[key] = event
+        return True, event
+
+
+def finish_search(
+    namespace: str,
+    query: str,
+    location: str | None,
+) -> None:
+    key = _cache_key(namespace, query, location)
+    with _INFLIGHT_LOCK:
+        event = _INFLIGHT_SEARCHES.pop(key, None)
+    if event is not None:
+        event.set()
 
 
 def _connect(database_url: str):
