@@ -96,9 +96,6 @@ def _fetch_shopping_data(
             "gl": "ru",
             "link": "resolved",
         }
-        if location:
-            params["location"] = location
-
         try:
             response = requests.get(
                 SEARCHAPI_URL,
