@@ -4,6 +4,8 @@ from typing import Any
 
 import requests
 from search_cache import (
+    begin_search,
+    finish_search,
     get_persistent_results,
     save_persistent_results,
 )
@@ -159,40 +161,53 @@ def search_google_shopping(
         _SEARCH_CACHE[cache_key] = (now, persistent)
         return [dict(item) for item in persistent]
 
-    data = _fetch_shopping_data(query, location)
-
-    results = []
-
-    for item in data.get("shopping_results", []):
-        price = item.get("extracted_price")
-
-        results.append(
-            {
-                "title": item.get("title"),
-                "price": price,
-                "price_text": item.get("price"),
-                "old_price": item.get("extracted_old_price")
-                or item.get("extracted_original_price"),
-                "old_price_text": item.get("old_price")
-                or item.get("original_price"),
-                "store": item.get("source") or item.get("seller"),
-                "link": item.get("product_link") or item.get("link"),
-                "rating": item.get("rating"),
-                "reviews": item.get("reviews"),
-                "delivery": item.get("delivery"),
-                "extensions": item.get("extensions", []),
-            }
-        )
-
-    _SEARCH_CACHE[cache_key] = (
-        now,
-        [dict(item) for item in results],
-    )
-    save_persistent_results(
+    is_leader, completed = begin_search(
         "google_shopping",
         query,
         location,
-        results,
-        SEARCH_CACHE_TTL_SECONDS,
     )
-    return results
+    if not is_leader:
+        if not completed.wait(timeout=190):
+            raise RuntimeError("Timed out waiting for identical shopping search")
+        return search_google_shopping(query, location)
+
+    try:
+        data = _fetch_shopping_data(query, location)
+
+        results = []
+
+        for item in data.get("shopping_results", []):
+            price = item.get("extracted_price")
+
+            results.append(
+                {
+                    "title": item.get("title"),
+                    "price": price,
+                    "price_text": item.get("price"),
+                    "old_price": item.get("extracted_old_price")
+                    or item.get("extracted_original_price"),
+                    "old_price_text": item.get("old_price")
+                    or item.get("original_price"),
+                    "store": item.get("source") or item.get("seller"),
+                    "link": item.get("product_link") or item.get("link"),
+                    "rating": item.get("rating"),
+                    "reviews": item.get("reviews"),
+                    "delivery": item.get("delivery"),
+                    "extensions": item.get("extensions", []),
+                }
+            )
+
+        _SEARCH_CACHE[cache_key] = (
+            now,
+            [dict(item) for item in results],
+        )
+        save_persistent_results(
+            "google_shopping",
+            query,
+            location,
+            results,
+            SEARCH_CACHE_TTL_SECONDS,
+        )
+        return results
+    finally:
+        finish_search("google_shopping", query, location)
