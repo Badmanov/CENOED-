@@ -68,6 +68,26 @@ class SearchFailureCacheTests(unittest.TestCase):
             )
         )
 
+    def test_equivalent_product_spelling_has_one_key(self):
+        first = search_cache._cache_key(
+            "shopping",
+            "Corona Extra 0,355 л — 6 бутылок",
+            "Москва, Россия",
+        )
+        second = search_cache._cache_key(
+            "shopping",
+            "corona extra 0.355л 6 бутылок",
+            "москва россия",
+        )
+
+        self.assertEqual(first, second)
+
+    def test_unit_words_are_normalized(self):
+        self.assertEqual(
+            search_cache.normalize_search_text("Напиток 1 литр"),
+            search_cache.normalize_search_text("напиток 1л"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
