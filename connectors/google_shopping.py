@@ -94,8 +94,7 @@ def _fetch_shopping_data(
             "q": query,
             "hl": "ru",
             "gl": "ru",
-            "google_domain": "google.ru",
-            "device": "desktop",
+            "link": "resolved",
         }
         if location:
             params["location"] = location
@@ -147,10 +146,12 @@ def search_google_shopping(
                 "title": item.get("title"),
                 "price": price,
                 "price_text": item.get("price"),
-                "old_price": item.get("extracted_old_price"),
-                "old_price_text": item.get("old_price"),
-                "store": item.get("source"),
-                "link": item.get("product_link"),
+                "old_price": item.get("extracted_old_price")
+                or item.get("extracted_original_price"),
+                "old_price_text": item.get("old_price")
+                or item.get("original_price"),
+                "store": item.get("source") or item.get("seller"),
+                "link": item.get("product_link") or item.get("link"),
                 "rating": item.get("rating"),
                 "reviews": item.get("reviews"),
                 "delivery": item.get("delivery"),
