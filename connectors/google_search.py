@@ -5,6 +5,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from search_cache import (
+    begin_search,
+    finish_search,
     get_persistent_results,
     save_persistent_results,
 )
@@ -389,148 +391,160 @@ def search_retailer_web(
         _SEARCH_CACHE[cache_key] = (now, persistent)
         return [dict(item) for item in persistent]
 
-    retailer_hint = _retailer_search_hint()
-    search_text = f"{query} {retailer_hint}"
-    errors: list[str] = []
-    data: dict[str, Any] | None = None
-    scrapedo_token = _runtime_key("SCRAPEDO_TOKEN", SCRAPEDO_TOKEN)
-    serpapi_key = _runtime_key("SERPAPI_KEY", SERPAPI_KEY)
-    searchapi_key = _runtime_key("SEARCHAPI_KEY", SEARCHAPI_KEY)
-
-    if scrapedo_token:
-        params = {
-            "token": scrapedo_token,
-            "q": search_text,
-            "hl": "ru",
-            "gl": "ru",
-            "google_domain": "google.ru",
-            "device": "desktop",
-            "resolveGoto": "true",
-        }
-        if location:
-            params["location"] = location
-
-        try:
-            response = requests.get(
-                SCRAPEDO_SEARCH_URL,
-                params=params,
-                timeout=60,
-            )
-            response.raise_for_status()
-            data = response.json()
-        except Exception as error:
-            errors.append(
-                f"Scrape.do: {type(error).__name__}"
-            )
-
-    if data is None and serpapi_key:
-        params = {
-            "api_key": serpapi_key,
-            "engine": "google",
-            "q": search_text,
-            "hl": "ru",
-            "gl": "ru",
-            "google_domain": "google.ru",
-            "device": "desktop",
-        }
-        if location:
-            params["location"] = location
-
-        try:
-            response = requests.get(
-                SERPAPI_SEARCH_URL,
-                params=params,
-                timeout=60,
-            )
-            response.raise_for_status()
-            candidate = response.json()
-            if candidate.get("error"):
-                raise RuntimeError(str(candidate["error"]))
-            data = candidate
-        except Exception as error:
-            errors.append(
-                f"SerpApi: {type(error).__name__}"
-            )
-
-    if data is None and searchapi_key:
-        params = {
-            "api_key": searchapi_key,
-            "engine": "google",
-            "q": search_text,
-            "hl": "ru",
-            "gl": "ru",
-            "link": "resolved",
-        }
-
-        try:
-            response = requests.get(
-                SEARCHAPI_SEARCH_URL,
-                params=params,
-                timeout=60,
-            )
-            response.raise_for_status()
-            candidate = response.json()
-            if candidate.get("error"):
-                raise RuntimeError(str(candidate["error"]))
-            data = candidate
-        except Exception as error:
-            errors.append(
-                f"SearchApi: {type(error).__name__}"
-            )
-
-    if data is None:
-        if not errors:
-            raise RuntimeError(
-                "No retailer search provider is configured"
-            )
-        raise RuntimeError(
-            "Retailer search providers failed: "
-            + "; ".join(errors)
-        )
-
-    raw_results = data.get(
-        "organic_results",
-        [],
-    )
-
-    if not isinstance(raw_results, list):
-        return []
-
-    offers: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-
-
-    for result in raw_results:
-
-        if not isinstance(result, dict):
-            continue
-
-        offer = _build_offer(result)
-
-        if offer is None:
-            continue
-
-        identity = (
-            str(offer.get("store") or ""),
-            str(offer.get("link") or ""),
-        )
-
-        if identity in seen:
-            continue
-
-        seen.add(identity)
-        offers.append(offer)
-
-
-    _SEARCH_CACHE[cache_key] = (
-        now,
-        [dict(item) for item in offers],
-    )
-    save_persistent_results(
+    is_leader, completed = begin_search(
         "retailer_web",
         query,
         location,
-        offers,
-        SEARCH_CACHE_TTL_SECONDS,
     )
-    return offers
+    if not is_leader:
+        if not completed.wait(timeout=190):
+            raise RuntimeError(
+                "Timed out waiting for identical retailer search"
+            )
+        return search_retailer_web(query, location)
+
+    try:
+        retailer_hint = _retailer_search_hint()
+        search_text = f"{query} {retailer_hint}"
+        errors: list[str] = []
+        data: dict[str, Any] | None = None
+        scrapedo_token = _runtime_key("SCRAPEDO_TOKEN", SCRAPEDO_TOKEN)
+        serpapi_key = _runtime_key("SERPAPI_KEY", SERPAPI_KEY)
+        searchapi_key = _runtime_key("SEARCHAPI_KEY", SEARCHAPI_KEY)
+
+        if scrapedo_token:
+            params = {
+                "token": scrapedo_token,
+                "q": search_text,
+                "hl": "ru",
+                "gl": "ru",
+                "google_domain": "google.ru",
+                "device": "desktop",
+                "resolveGoto": "true",
+            }
+            if location:
+                params["location"] = location
+
+            try:
+                response = requests.get(
+                    SCRAPEDO_SEARCH_URL,
+                    params=params,
+                    timeout=60,
+                )
+                response.raise_for_status()
+                data = response.json()
+            except Exception as error:
+                errors.append(
+                    f"Scrape.do: {type(error).__name__}"
+                )
+
+        if data is None and serpapi_key:
+            params = {
+                "api_key": serpapi_key,
+                "engine": "google",
+                "q": search_text,
+                "hl": "ru",
+                "gl": "ru",
+                "google_domain": "google.ru",
+                "device": "desktop",
+            }
+            if location:
+                params["location"] = location
+
+            try:
+                response = requests.get(
+                    SERPAPI_SEARCH_URL,
+                    params=params,
+                    timeout=60,
+                )
+                response.raise_for_status()
+                candidate = response.json()
+                if candidate.get("error"):
+                    raise RuntimeError(str(candidate["error"]))
+                data = candidate
+            except Exception as error:
+                errors.append(
+                    f"SerpApi: {type(error).__name__}"
+                )
+
+        if data is None and searchapi_key:
+            params = {
+                "api_key": searchapi_key,
+                "engine": "google",
+                "q": search_text,
+                "hl": "ru",
+                "gl": "ru",
+                "link": "resolved",
+            }
+
+            try:
+                response = requests.get(
+                    SEARCHAPI_SEARCH_URL,
+                    params=params,
+                    timeout=60,
+                )
+                response.raise_for_status()
+                candidate = response.json()
+                if candidate.get("error"):
+                    raise RuntimeError(str(candidate["error"]))
+                data = candidate
+            except Exception as error:
+                errors.append(
+                    f"SearchApi: {type(error).__name__}"
+                )
+
+        if data is None:
+            if not errors:
+                raise RuntimeError(
+                    "No retailer search provider is configured"
+                )
+            raise RuntimeError(
+                "Retailer search providers failed: "
+                + "; ".join(errors)
+            )
+
+        raw_results = data.get(
+            "organic_results",
+            [],
+        )
+
+        if not isinstance(raw_results, list):
+            return []
+
+        offers: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        for result in raw_results:
+            if not isinstance(result, dict):
+                continue
+
+            offer = _build_offer(result)
+
+            if offer is None:
+                continue
+
+            identity = (
+                str(offer.get("store") or ""),
+                str(offer.get("link") or ""),
+            )
+
+            if identity in seen:
+                continue
+
+            seen.add(identity)
+            offers.append(offer)
+
+        _SEARCH_CACHE[cache_key] = (
+            now,
+            [dict(item) for item in offers],
+        )
+        save_persistent_results(
+            "retailer_web",
+            query,
+            location,
+            offers,
+            SEARCH_CACHE_TTL_SECONDS,
+        )
+        return offers
+    finally:
+        finish_search("retailer_web", query, location)
