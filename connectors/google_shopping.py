@@ -5,8 +5,11 @@ from typing import Any
 import requests
 from search_cache import (
     begin_search,
+    clear_search_failure,
     finish_search,
     get_persistent_results,
+    get_recent_failure,
+    record_search_failure,
     save_persistent_results,
 )
 
@@ -161,6 +164,16 @@ def search_google_shopping(
         _SEARCH_CACHE[cache_key] = (now, persistent)
         return [dict(item) for item in persistent]
 
+    recent_failure = get_recent_failure(
+        "google_shopping",
+        query,
+        location,
+    )
+    if recent_failure is not None:
+        raise RuntimeError(
+            f"Recent shopping search failure: {recent_failure}"
+        )
+
     is_leader, completed = begin_search(
         "google_shopping",
         query,
@@ -208,6 +221,15 @@ def search_google_shopping(
             results,
             SEARCH_CACHE_TTL_SECONDS,
         )
+        clear_search_failure("google_shopping", query, location)
         return results
+    except Exception as error:
+        record_search_failure(
+            "google_shopping",
+            query,
+            location,
+            error,
+        )
+        raise
     finally:
         finish_search("google_shopping", query, location)
