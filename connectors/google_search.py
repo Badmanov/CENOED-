@@ -10,6 +10,7 @@ from search_cache import (
     finish_search,
     get_persistent_results,
     get_recent_failure,
+    normalize_search_text,
     record_search_failure,
     save_persistent_results,
 )
@@ -377,8 +378,8 @@ def search_retailer_web(
     import requests
 
     cache_key = (
-        " ".join(query.casefold().split()),
-        " ".join((location or "").casefold().split()),
+        normalize_search_text(query),
+        normalize_search_text(location),
     )
     cached = _SEARCH_CACHE.get(cache_key)
     now = time.monotonic()
