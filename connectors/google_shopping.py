@@ -1,4 +1,5 @@
 import os
+import time
 from typing import Any
 
 import requests
@@ -11,6 +12,11 @@ SEARCHAPI_KEY = os.getenv("SEARCHAPI_KEY")
 SCRAPEDO_URL = "https://api.scrape.do/plugin/google/shopping"
 SERPAPI_URL = "https://serpapi.com/search.json"
 SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
+SEARCH_CACHE_TTL_SECONDS = 600
+_SEARCH_CACHE: dict[
+    tuple[str, str],
+    tuple[float, list[dict[str, Any]]],
+] = {}
 
 
 def _runtime_key(name: str, imported_value: str | None) -> str | None:
@@ -131,6 +137,15 @@ def search_google_shopping(
     При его недоступности использует SerpApi или SearchApi.
     """
 
+    cache_key = (
+        " ".join(query.casefold().split()),
+        " ".join((location or "").casefold().split()),
+    )
+    cached = _SEARCH_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < SEARCH_CACHE_TTL_SECONDS:
+        return [dict(item) for item in cached[1]]
+
     data = _fetch_shopping_data(query, location)
 
     results = []
@@ -156,4 +171,8 @@ def search_google_shopping(
             }
         )
 
+    _SEARCH_CACHE[cache_key] = (
+        now,
+        [dict(item) for item in results],
+    )
     return results

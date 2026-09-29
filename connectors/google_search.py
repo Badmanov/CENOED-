@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -9,6 +10,11 @@ SEARCHAPI_KEY = os.getenv("SEARCHAPI_KEY")
 SCRAPEDO_SEARCH_URL = "https://api.scrape.do/plugin/google/search"
 SERPAPI_SEARCH_URL = "https://serpapi.com/search.json"
 SEARCHAPI_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
+SEARCH_CACHE_TTL_SECONDS = 600
+_SEARCH_CACHE: dict[
+    tuple[str, str],
+    tuple[float, list[dict[str, Any]]],
+] = {}
 
 
 def _runtime_key(name: str, imported_value: str | None) -> str | None:
@@ -46,9 +52,8 @@ RETAILER_DOMAINS = (
 
 
 RETAILER_SEARCH_DOMAINS = (
-    "market.yandex.ru",
-    "ozon.ru",
-    "wildberries.ru",
+    "krasnoeibeloe.ru",
+    "winelab.ru",
     "perekrestok.ru",
     "5ka.ru",
     "dixy.ru",
@@ -57,8 +62,6 @@ RETAILER_SEARCH_DOMAINS = (
     "av.ru",
     "chizhik.club",
     "svetoforonline.ru",
-    "winelab.ru",
-    "krasnoeibeloe.ru",
 )
 
 
@@ -363,6 +366,15 @@ def search_retailer_web(
 
     import requests
 
+    cache_key = (
+        " ".join(query.casefold().split()),
+        " ".join((location or "").casefold().split()),
+    )
+    cached = _SEARCH_CACHE.get(cache_key)
+    now = time.monotonic()
+    if cached and now - cached[0] < SEARCH_CACHE_TTL_SECONDS:
+        return [dict(item) for item in cached[1]]
+
     retailer_hint = _retailer_search_hint()
     search_text = f"{query} {retailer_hint}"
     errors: list[str] = []
@@ -496,4 +508,8 @@ def search_retailer_web(
         offers.append(offer)
 
 
+    _SEARCH_CACHE[cache_key] = (
+        now,
+        [dict(item) for item in offers],
+    )
     return offers
