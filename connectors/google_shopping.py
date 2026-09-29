@@ -3,6 +3,10 @@ import time
 from typing import Any
 
 import requests
+from search_cache import (
+    get_persistent_results,
+    save_persistent_results,
+)
 
 
 SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
@@ -12,7 +16,7 @@ SEARCHAPI_KEY = os.getenv("SEARCHAPI_KEY")
 SCRAPEDO_URL = "https://api.scrape.do/plugin/google/shopping"
 SERPAPI_URL = "https://serpapi.com/search.json"
 SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
-SEARCH_CACHE_TTL_SECONDS = 600
+SEARCH_CACHE_TTL_SECONDS = 3600
 _SEARCH_CACHE: dict[
     tuple[str, str],
     tuple[float, list[dict[str, Any]]],
@@ -146,6 +150,15 @@ def search_google_shopping(
     if cached and now - cached[0] < SEARCH_CACHE_TTL_SECONDS:
         return [dict(item) for item in cached[1]]
 
+    persistent = get_persistent_results(
+        "google_shopping",
+        query,
+        location,
+    )
+    if persistent is not None:
+        _SEARCH_CACHE[cache_key] = (now, persistent)
+        return [dict(item) for item in persistent]
+
     data = _fetch_shopping_data(query, location)
 
     results = []
@@ -174,5 +187,12 @@ def search_google_shopping(
     _SEARCH_CACHE[cache_key] = (
         now,
         [dict(item) for item in results],
+    )
+    save_persistent_results(
+        "google_shopping",
+        query,
+        location,
+        results,
+        SEARCH_CACHE_TTL_SECONDS,
     )
     return results

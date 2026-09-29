@@ -4,13 +4,18 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
+from search_cache import (
+    get_persistent_results,
+    save_persistent_results,
+)
+
 SCRAPEDO_TOKEN = os.getenv("SCRAPEDO_TOKEN")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 SEARCHAPI_KEY = os.getenv("SEARCHAPI_KEY")
 SCRAPEDO_SEARCH_URL = "https://api.scrape.do/plugin/google/search"
 SERPAPI_SEARCH_URL = "https://serpapi.com/search.json"
 SEARCHAPI_SEARCH_URL = "https://www.searchapi.io/api/v1/search"
-SEARCH_CACHE_TTL_SECONDS = 600
+SEARCH_CACHE_TTL_SECONDS = 3600
 _SEARCH_CACHE: dict[
     tuple[str, str],
     tuple[float, list[dict[str, Any]]],
@@ -375,6 +380,15 @@ def search_retailer_web(
     if cached and now - cached[0] < SEARCH_CACHE_TTL_SECONDS:
         return [dict(item) for item in cached[1]]
 
+    persistent = get_persistent_results(
+        "retailer_web",
+        query,
+        location,
+    )
+    if persistent is not None:
+        _SEARCH_CACHE[cache_key] = (now, persistent)
+        return [dict(item) for item in persistent]
+
     retailer_hint = _retailer_search_hint()
     search_text = f"{query} {retailer_hint}"
     errors: list[str] = []
@@ -511,5 +525,12 @@ def search_retailer_web(
     _SEARCH_CACHE[cache_key] = (
         now,
         [dict(item) for item in offers],
+    )
+    save_persistent_results(
+        "retailer_web",
+        query,
+        location,
+        offers,
+        SEARCH_CACHE_TTL_SECONDS,
     )
     return offers
