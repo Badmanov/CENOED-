@@ -2,8 +2,10 @@ import copy
 import hashlib
 import json
 import os
+import re
 import threading
 import time
+import unicodedata
 from typing import Any
 
 _TABLE_READY = False
@@ -19,12 +21,50 @@ def _database_url() -> str | None:
     return value.strip() if value and value.strip() else None
 
 
-def _cache_key(namespace: str, query: str, location: str | None) -> str:
+def normalize_search_text(value: str | None) -> str:
+    """Canonicalize harmless spelling and formatting differences."""
+    text = unicodedata.normalize("NFKC", value or "")
+    text = text.casefold().replace("ё", "е")
+    text = re.sub(r"(?<=\d)[,.](?=\d)", ".", text)
+    tokens = re.findall(r"\d+(?:\.\d+)?|[^\W\d_]+", text)
+    unit_aliases = {
+        "литр": "л",
+        "литра": "л",
+        "литров": "л",
+        "миллилитр": "мл",
+        "миллилитра": "мл",
+        "миллилитров": "мл",
+        "килограмм": "кг",
+        "килограмма": "кг",
+        "килограммов": "кг",
+        "грамм": "г",
+        "грамма": "г",
+        "граммов": "г",
+    }
+    return " ".join(unit_aliases.get(token, token) for token in tokens)
+
+
+def _legacy_cache_key(
+    namespace: str,
+    query: str,
+    location: str | None,
+) -> str:
     normalized = "|".join(
         (
             namespace,
             " ".join(query.casefold().split()),
             " ".join((location or "").casefold().split()),
+        )
+    )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _cache_key(namespace: str, query: str, location: str | None) -> str:
+    normalized = "|".join(
+        (
+            namespace,
+            normalize_search_text(query),
+            normalize_search_text(location),
         )
     )
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -148,14 +188,16 @@ def get_persistent_results(
         _ensure_table(database_url)
         with _connect(database_url) as connection:
             with connection.cursor() as cursor:
+                current_key = _cache_key(namespace, query, location)
+                legacy_key = _legacy_cache_key(namespace, query, location)
                 cursor.execute(
                     """
                     SELECT results
                     FROM search_result_cache
-                    WHERE cache_key = %s
+                    WHERE cache_key IN (%s, %s)
                       AND expires_at > NOW();
                     """,
-                    (_cache_key(namespace, query, location),),
+                    (current_key, legacy_key),
                 )
                 row = cursor.fetchone()
         if not row:
