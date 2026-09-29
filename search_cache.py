@@ -3,12 +3,15 @@ import hashlib
 import json
 import os
 import threading
+import time
 from typing import Any
 
 _TABLE_READY = False
 _TABLE_LOCK = threading.Lock()
 _INFLIGHT_LOCK = threading.Lock()
 _INFLIGHT_SEARCHES: dict[str, threading.Event] = {}
+_FAILURE_LOCK = threading.Lock()
+_RECENT_FAILURES: dict[str, tuple[float, str]] = {}
 
 
 def _database_url() -> str | None:
@@ -53,6 +56,48 @@ def finish_search(
         event = _INFLIGHT_SEARCHES.pop(key, None)
     if event is not None:
         event.set()
+
+
+def get_recent_failure(
+    namespace: str,
+    query: str,
+    location: str | None,
+    max_age_seconds: int = 60,
+) -> str | None:
+    """Return a recent provider failure without calling it again."""
+    key = _cache_key(namespace, query, location)
+    now = time.monotonic()
+    with _FAILURE_LOCK:
+        failure = _RECENT_FAILURES.get(key)
+        if failure is None:
+            return None
+        created_at, message = failure
+        if now - created_at <= max_age_seconds:
+            return message
+        _RECENT_FAILURES.pop(key, None)
+    return None
+
+
+def record_search_failure(
+    namespace: str,
+    query: str,
+    location: str | None,
+    error: Exception,
+) -> None:
+    key = _cache_key(namespace, query, location)
+    message = f"{type(error).__name__}: {error}"
+    with _FAILURE_LOCK:
+        _RECENT_FAILURES[key] = (time.monotonic(), message)
+
+
+def clear_search_failure(
+    namespace: str,
+    query: str,
+    location: str | None,
+) -> None:
+    key = _cache_key(namespace, query, location)
+    with _FAILURE_LOCK:
+        _RECENT_FAILURES.pop(key, None)
 
 
 def _connect(database_url: str):
