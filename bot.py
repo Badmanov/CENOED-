@@ -355,6 +355,22 @@ def store_selection_matches(
     )
 
 
+def needs_retailer_web_search(
+    offers: list[dict[str, Any]],
+) -> bool:
+    """Use the extra web request only when shopping found no major chain."""
+    if not offers:
+        return True
+
+    return not any(
+        format_retailer_name(
+            offer.get("store"),
+            offer.get("link"),
+        ) in STORE_SELECTION_RETAILERS
+        for offer in offers
+    )
+
+
 def format_store_selection_notice(
     user_query: str,
     user_city: str | None,
@@ -1441,28 +1457,29 @@ async def message_handler(
                 if results:
                     search_query = fallback_query
 
-        web_query = (
-            build_fallback_search_query(
-                user_query
+        web_results = []
+        if needs_retailer_web_search(results):
+            web_query = (
+                build_fallback_search_query(
+                    user_query
+                )
             )
-        )
-        try:
-            web_results = await asyncio.to_thread(
+            try:
+                web_results = await asyncio.to_thread(
 
-                search_retailer_web,
+                    search_retailer_web,
 
-                web_query,
+                    web_query,
 
-                search_location,
+                    search_location,
 
-            )
-        except Exception as web_error:
-            print(
-                f"RETAILER SEARCH ERROR: "
-                f"{type(web_error).__name__}: {web_error}",
-                flush=True,
-            )
-            web_results = []
+                )
+            except Exception as web_error:
+                print(
+                    f"RETAILER SEARCH ERROR: "
+                    f"{type(web_error).__name__}: {web_error}",
+                    flush=True,
+                )
 
         if web_results:
             if results:
