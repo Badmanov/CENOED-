@@ -35,6 +35,10 @@ from product_matching import (
     extract_pack_count,
     is_relevant_result,
 )
+from retailer_links import (
+    is_likely_grocery_query,
+    large_retailers_for_query,
+)
 from search_query import (
     build_fallback_search_query,
     build_search_query,
@@ -249,6 +253,14 @@ def format_retailer_name(
                 "krasnoeibeloe.ru",
             ),
             "🔞 Красное & Белое",
+        ),
+        (
+            ("чижик", "chizhik.club"),
+            "🟡 Чижик",
+        ),
+        (
+            ("светофор", "svetoforonline.ru"),
+            "🔴 Светофор",
         ),
     )
 
@@ -1415,8 +1427,9 @@ async def message_handler(
     # GOOGLE SHOPPING
     # ========================================================
 
+    results = []
+    shopping_failed = False
     try:
-
         results = await asyncio.to_thread(
 
             search_google_shopping,
@@ -1457,50 +1470,44 @@ async def message_handler(
                 if results:
                     search_query = fallback_query
 
-        web_results = []
-        if needs_retailer_web_search(results):
-            web_query = (
-                build_fallback_search_query(
-                    user_query
-                )
-            )
-            try:
-                web_results = await asyncio.to_thread(
-
-                    search_retailer_web,
-
-                    web_query,
-
-                    search_location,
-
-                )
-            except Exception as web_error:
-                print(
-                    f"RETAILER SEARCH ERROR: "
-                    f"{type(web_error).__name__}: {web_error}",
-                    flush=True,
-                )
-
-        if web_results:
-            if results:
-                results.extend(web_results)
-            else:
-                results = web_results
-                search_query = web_query
-
     except Exception as e:
-
+        shopping_failed = True
         print(
             f"SEARCH ERROR: "
             f"{type(e).__name__}: {e}",
             flush=True,
         )
 
+    web_query = build_fallback_search_query(user_query)
+    web_failed = False
+    web_results = []
+    if needs_retailer_web_search(results):
+        try:
+            web_results = await asyncio.to_thread(
+                search_retailer_web,
+                web_query,
+                search_location,
+            )
+        except Exception as web_error:
+            web_failed = True
+            print(
+                f"RETAILER SEARCH ERROR: "
+                f"{type(web_error).__name__}: {web_error}",
+                flush=True,
+            )
+
+    if web_results:
+        if results:
+            results.extend(web_results)
+        else:
+            results = web_results
+            search_query = web_query
+
+    if not results and shopping_failed and web_failed:
         await status_message.edit_text(
             "🦖 <b>Сейчас не получилось обновить цены.</b>\n\n"
             "Попробуй ещё раз немного позже."
         )
-
         return
 
 
@@ -2086,31 +2093,11 @@ async def message_handler(
     # LARGE GROCERY RETAILERS WITHOUT A DISPLAYED PRICE
     # ========================================================
 
-    grocery_retailers = (
-        (
-            "🟢 Пятёрочка",
-            "https://5ka.ru/",
-        ),
-        (
-            "🟢 Перекрёсток",
-            "https://www.perekrestok.ru/",
-        ),
-        (
-            "🔴 Магнит",
-            "https://magnit.ru/",
-        ),
-        (
-            "🟠 Дикси",
-            "https://dixy.ru/",
-        ),
-        (
-            "🟡 Чижик",
-            "https://chizhik.club/",
-        ),
-        (
-            "🔴 Светофор",
-            "https://svetoforonline.ru/",
-        ),
+    age_restricted_search = is_age_restricted_query(
+        user_query
+    )
+    grocery_retailers = large_retailers_for_query(
+        age_restricted=age_restricted_search,
     )
 
     displayed_retailers = set()
@@ -2123,12 +2110,18 @@ async def message_handler(
             )
         )
 
-    # Показываем дополнительный блок только для продуктового
-    # поиска, когда хотя бы одна крупная продуктовая сеть
-    # уже была найдена среди релевантных результатов.
-    grocery_search = any(
-        retailer_name in displayed_retailers
-        for retailer_name, _ in grocery_retailers
+    # Локальное определение продуктового запроса не расходует
+    # лимиты поисковых API. Поэтому ссылки на крупные сети
+    # остаются доступны, даже если выдача содержит ноунеймы.
+    grocery_search = (
+        is_likely_grocery_query(
+            user_query,
+            age_restricted=age_restricted_search,
+        )
+        or any(
+            retailer_name in displayed_retailers
+            for retailer_name, _ in grocery_retailers
+        )
     )
 
     if grocery_search:
@@ -2146,23 +2139,24 @@ async def message_handler(
             lines.append(
                 "🏪 <b>Проверить цену в крупных сетях:</b>"
             )
+            retailer_links = []
 
-            for (
-                retailer_name,
-                retailer_url,
-            ) in missing_grocery_retailers:
-
-                safe_url = html.escape(
-                    retailer_url,
-                    quote=True,
-                )
-
-                lines.append(
-                    f'• <a href="{safe_url}">'
+            for retailer_name, retailer_url in missing_grocery_retailers:
+                safe_url = html.escape(retailer_url, quote=True)
+                retailer_links.append(
+                    f'<a href="{safe_url}">'
                     f"{html.escape(retailer_name)}"
                     "</a>"
-                    " — цена зависит от магазина"
                 )
+
+            for start in range(0, len(retailer_links), 4):
+                lines.append(
+                    " · ".join(retailer_links[start:start + 4])
+                )
+
+            lines.append(
+                "Цены зависят от выбранной торговой точки."
+            )
 
     lowest_price = lowest_offer["numeric_price"]
 
