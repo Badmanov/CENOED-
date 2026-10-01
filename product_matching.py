@@ -449,7 +449,8 @@ def extract_pack_count(
         (
             r"\b(\d+)\s*"
             r"(?:бутылок|бутылки|банок|банки|"
-            r"пачек|пачки|упаковок|упаковки)\b"
+            r"пачек|пачки|упаковок|упаковки|"
+            r"шт|pcs|pieces)\b"
         ),
     )
 
@@ -1176,12 +1177,11 @@ def attributes_match(
         query
     )
 
+    title_count = extract_count(
+        title
+    )
+
     if query_count:
-
-        title_count = extract_count(
-            title
-        )
-
         if not title_count:
 
             return False
@@ -1192,6 +1192,14 @@ def attributes_match(
         ):
 
             return False
+
+    elif (
+        title_count
+        and any(value > 1 for value in title_count)
+        and (query_volume or query_weight)
+    ):
+
+        return False
 
     # --------------------------------------------------------
     # Multipack
@@ -1210,7 +1218,11 @@ def attributes_match(
 
             return False
 
-    elif title_pack_count is not None and title_pack_count > 1:
+    elif (
+        title_pack_count is not None
+        and title_pack_count > 1
+        and (query_volume or query_weight)
+    ):
 
         return False
 
