@@ -1,4 +1,5 @@
 import re
+from urllib.parse import quote_plus
 
 
 GROCERY_QUERY_TERMS = {
@@ -59,6 +60,27 @@ ALCOHOL_RETAILERS = (
 )
 
 
+RETAILER_SEARCH_URLS = {
+    "🟢 Перекрёсток": (
+        "https://www.perekrestok.ru/cat/search?search={query}"
+    ),
+    "🟢 ВкусВилл": "https://vkusvill.ru/search/?q={query}",
+}
+
+
+def retailer_url_for_query(
+    retailer_name: str,
+    fallback_url: str,
+    query: str | None,
+) -> str:
+    """Return a verified product-search URL or the official homepage."""
+    search_url = RETAILER_SEARCH_URLS.get(retailer_name)
+    cleaned_query = (query or "").strip()
+    if not search_url or not cleaned_query:
+        return fallback_url
+    return search_url.format(query=quote_plus(cleaned_query))
+
+
 def is_likely_grocery_query(
     text: str,
     *,
@@ -73,10 +95,21 @@ def is_likely_grocery_query(
 
 
 def large_retailers_for_query(
+    query: str | None = None,
     *,
     age_restricted: bool = False,
 ) -> tuple[tuple[str, str], ...]:
     retailers = BASE_GROCERY_RETAILERS
     if age_restricted:
         retailers += ALCOHOL_RETAILERS
-    return retailers
+    return tuple(
+        (
+            retailer_name,
+            retailer_url_for_query(
+                retailer_name,
+                retailer_url,
+                query,
+            ),
+        )
+        for retailer_name, retailer_url in retailers
+    )

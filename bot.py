@@ -2097,6 +2097,7 @@ async def message_handler(
         user_query
     )
     grocery_retailers = large_retailers_for_query(
+        user_query,
         age_restricted=age_restricted_search,
     )
 
