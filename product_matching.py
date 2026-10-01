@@ -57,6 +57,18 @@ def normalize_text(text: str) -> str:
             "индюшиный",
         ),
         (
+            r"\bванил(?:ь|и|ью|ьный|ьная|ьное|ьные)\b",
+            "ваниль",
+        ),
+        (
+            r"\bдын(?:я|и|ей|ю|ный|ная|ное|ные)\b",
+            "дыня",
+        ),
+        (
+            r"\bапельсин(?:а|ом|овый|овая|овое|овые)?\b",
+            "апельсин",
+        ),
+        (
             r"\bсвинин(?:а|ы|е|у|ой)\b",
             "свиной",
         ),
@@ -134,7 +146,7 @@ def normalize_text(text: str) -> str:
     )
 
     text = re.sub(
-        r"[^\w\s.+&/-]",
+        r"[^\w\s.+&/*×-]",
         " ",
         text,
     )
@@ -415,8 +427,8 @@ def extract_pack_count(
     )
 
     patterns = (
-        r"\b(\d+)\s*[xх]\s*\d",
-        r"\b\d+(?:\.\d+)?\s*(?:ml|l|kg|g)\s*[xх]\s*(\d+)\b",
+        r"\b(\d+)\s*[*xх×]\s*\d",
+        r"\b\d+(?:\.\d+)?\s*(?:ml|l|kg|g)\s*[*xх×]\s*(\d+)\b",
         (
             r"\b(?:упаковка|набор|pack)\s*"
             r"(?:из|of)?\s*(\d+)\b"
@@ -439,6 +451,44 @@ def extract_pack_count(
             )
 
     return None
+
+
+# ============================================================
+# FLAVOUR
+# ============================================================
+
+FLAVOUR_MARKERS = {
+    "апельсин",
+    "апельсиновый",
+    "ваниль",
+    "ванильный",
+    "дыня",
+    "дынный",
+    "лимон",
+    "лимонный",
+    "лайм",
+    "лаймовый",
+    "вишня",
+    "вишневый",
+    "малина",
+    "малиновый",
+    "манго",
+    "персик",
+    "персиковый",
+    "orange",
+    "vanilla",
+    "melon",
+    "lemon",
+    "lime",
+    "cherry",
+    "raspberry",
+    "mango",
+    "peach",
+}
+
+
+def extract_flavours(text: str) -> set[str]:
+    return set(normalize_text(text).split()) & FLAVOUR_MARKERS
 
 
 # ============================================================
@@ -1138,15 +1188,35 @@ def attributes_match(
         query
     )
 
+    title_pack_count = extract_pack_count(
+        title
+    )
+
     if query_pack_count is not None:
-
-        title_pack_count = extract_pack_count(
-            title
-        )
-
         if title_pack_count != query_pack_count:
 
             return False
+
+    elif title_pack_count is not None and title_pack_count > 1:
+
+        return False
+
+    # --------------------------------------------------------
+    # Flavour
+    # --------------------------------------------------------
+
+    query_flavours = extract_flavours(query)
+    title_flavours = extract_flavours(title)
+
+    if query_flavours:
+
+        if not query_flavours.issubset(title_flavours):
+
+            return False
+
+    elif title_flavours:
+
+        return False
 
     # --------------------------------------------------------
     # Pampers
