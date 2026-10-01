@@ -146,7 +146,7 @@ def normalize_text(text: str) -> str:
     )
 
     text = re.sub(
-        r"[^\w\s.+&/*×-]",
+        r"[^\w\s.+&/*×()-]",
         " ",
         text,
     )
@@ -422,6 +422,19 @@ def extract_count(
 def extract_pack_count(
     text: str,
 ):
+    raw_text = str(text or "").lower().replace(",", ".")
+
+    # Some wholesale cards put the case size in parentheses after the
+    # volume: "1л. ПЭТ. (12)".  Keep this narrow so model numbers in
+    # parentheses are not mistaken for a multipack.
+    parenthesized_count = re.search(
+        r"\b\d+(?:\.\d+)?\s*(?:мл|ml|л|l|г|g|кг|kg)"
+        r"[^()]{0,24}\(\s*(\d+)\s*\)",
+        raw_text,
+    )
+    if parenthesized_count:
+        return int(parenthesized_count.group(1))
+
     normalized = normalize_text(
         text
     )
