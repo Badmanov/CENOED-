@@ -1,4 +1,18 @@
 import copy
+
+def configured_cache_ttl_seconds(
+    default_seconds: int = 6 * 60 * 60,
+) -> int:
+    """Read a bounded cache lifetime without risking a startup failure."""
+    raw_value = os.getenv("SEARCH_CACHE_TTL_SECONDS", "").strip()
+    if not raw_value:
+        return default_seconds
+    try:
+        requested = int(raw_value)
+    except ValueError:
+        return default_seconds
+    return min(max(requested, 5 * 60), 24 * 60 * 60)
+
 import hashlib
 import json
 import os
