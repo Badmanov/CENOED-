@@ -6,6 +6,7 @@ import requests
 from search_cache import (
     begin_search,
     clear_search_failure,
+    configured_cache_ttl_seconds,
     finish_search,
     get_persistent_results,
     get_recent_failure,
@@ -22,7 +23,7 @@ SEARCHAPI_KEY = os.getenv("SEARCHAPI_KEY")
 SCRAPEDO_URL = "https://api.scrape.do/plugin/google/shopping"
 SERPAPI_URL = "https://serpapi.com/search.json"
 SEARCHAPI_URL = "https://www.searchapi.io/api/v1/search"
-SEARCH_CACHE_TTL_SECONDS = 3600
+SEARCH_CACHE_TTL_SECONDS = configured_cache_ttl_seconds()
 _SEARCH_CACHE: dict[
     tuple[str, str],
     tuple[float, list[dict[str, Any]]],
