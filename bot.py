@@ -1622,12 +1622,12 @@ async def message_handler(
             item.get("title")
             or ""
         )
-        match_text = (
-            item.get("match_text")
-            or title
-        )
         matching_item = dict(item)
-        matching_item["title"] = match_text
+        # A search snippet often repeats the user's query even when the
+        # linked product has another brand.  Match priced offers against the
+        # real product title so, for example, Evervess Cola cannot satisfy a
+        # search for Добрый Кола merely because the snippet mentions it.
+        matching_item["title"] = title
 
 
         try:
@@ -2324,9 +2324,10 @@ def find_lowest_subscription_offer(
 
             title = item.get("title") or ""
             matching_item = dict(item)
-            matching_item["title"] = (
-                item.get("match_text") or title
-            )
+            # Subscription alerts must use the same strict product-title
+            # check as the interactive search.  Snippets may contain the
+            # requested words while pointing to a different brand.
+            matching_item["title"] = title
 
             try:
                 relevant = is_relevant_result(
