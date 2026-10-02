@@ -2,6 +2,21 @@ from collections.abc import Callable, Collection
 from typing import Any
 
 
+def has_preferred_offers(
+    offers: list[dict[str, Any]],
+    preferred_retailers: Collection[str],
+    retailer_formatter: Callable[[Any, Any], str],
+) -> bool:
+    """Return whether at least one priced offer belongs to a major retailer."""
+    return any(
+        retailer_formatter(
+            offer.get("store"),
+            offer.get("link"),
+        ) in preferred_retailers
+        for offer in offers
+    )
+
+
 def select_display_offers(
     offers: list[dict[str, Any]],
     preferred_retailers: Collection[str],
