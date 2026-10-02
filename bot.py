@@ -30,6 +30,7 @@ from connectors.google_search import (
     search_retailer_web,
 )
 from connectors.google_shopping import search_google_shopping
+from connectors.magnit import search_magnit
 from location_profile import compose_search_location
 from offer_display import has_preferred_offers, select_display_offers
 from product_matching import (
@@ -1478,6 +1479,27 @@ async def message_handler(
             f"{type(e).__name__}: {e}",
             flush=True,
         )
+
+    official_results = []
+    if is_likely_grocery_query(user_query):
+        try:
+            official_results = await asyncio.to_thread(
+                search_magnit,
+                user_query,
+                search_location,
+            )
+        except Exception as official_error:
+            print(
+                "MAGNIT SEARCH ERROR: "
+                f"{type(official_error).__name__}: {official_error}",
+                flush=True,
+            )
+
+    if official_results:
+        if results:
+            results.extend(official_results)
+        else:
+            results = official_results
 
     web_query = build_fallback_search_query(user_query)
     web_failed = False
