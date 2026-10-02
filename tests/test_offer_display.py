@@ -1,6 +1,6 @@
 import unittest
 
-from offer_display import select_display_offers
+from offer_display import has_preferred_offers, select_display_offers
 
 
 class OfferDisplayTests(unittest.TestCase):
@@ -70,6 +70,31 @@ class OfferDisplayTests(unittest.TestCase):
         self.assertEqual(
             [item["store"] for item in selected[:2]],
             ["Пятёрочка", "Перекрёсток"],
+        )
+
+    def test_detects_when_major_retailer_has_a_price(self):
+        offers = [
+            self.offer("Неизвестный", 50),
+            self.offer("Пятёрочка", 100),
+        ]
+
+        self.assertTrue(
+            has_preferred_offers(
+                offers,
+                self.PREFERRED,
+                lambda store, link: store,
+            )
+        )
+
+    def test_reports_no_major_retailer_price(self):
+        offers = [self.offer("Неизвестный", 50)]
+
+        self.assertFalse(
+            has_preferred_offers(
+                offers,
+                self.PREFERRED,
+                lambda store, link: store,
+            )
         )
 
 
