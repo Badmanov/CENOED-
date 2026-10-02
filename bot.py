@@ -31,6 +31,7 @@ from connectors.google_search import (
 )
 from connectors.google_shopping import search_google_shopping
 from location_profile import compose_search_location
+from offer_display import select_display_offers
 from product_matching import (
     extract_pack_count,
     is_relevant_result,
@@ -1761,18 +1762,11 @@ async def message_handler(
         filtered_results,
         key=lambda item: item["numeric_price"],
     )
-    filtered_results.sort(
-        key=lambda item: (
-            0
-            if format_retailer_name(
-                item.get("store"),
-                item.get("link"),
-            ) in PREFERRED_RETAILERS
-            else 1,
-            item["numeric_price"],
-        )
+    filtered_results = select_display_offers(
+        filtered_results,
+        PREFERRED_RETAILERS,
+        format_retailer_name,
     )
-    filtered_results = filtered_results[:10]
 
 
     # ========================================================
