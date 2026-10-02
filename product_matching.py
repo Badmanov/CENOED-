@@ -505,6 +505,23 @@ def extract_flavours(text: str) -> set[str]:
     return set(normalize_text(text).split()) & FLAVOUR_MARKERS
 
 
+ZERO_SUGAR_PATTERNS = (
+    r"\bбез\s+сахар(?:а|ом)?\b",
+    r"\bноль\s+сахар(?:а|ом)?\b",
+    r"\b0\s*%?\s*сахар(?:а|ом)?\b",
+    r"\b(?:zero|зеро)(?:\s+sugar)?\b",
+    r"\bsugar\s+free\b",
+)
+
+
+def is_zero_sugar(text: str) -> bool:
+    normalized = normalize_text(text)
+    return any(
+        re.search(pattern, normalized)
+        for pattern in ZERO_SUGAR_PATTERNS
+    )
+
+
 # ============================================================
 # PAMPERS SIZE
 # ============================================================
@@ -1240,6 +1257,16 @@ def attributes_match(
             return False
 
     elif title_flavours:
+
+        return False
+
+    # --------------------------------------------------------
+    # Sugar variant
+    # --------------------------------------------------------
+
+    # The regular and zero-sugar versions are different products.  Do not
+    # silently substitute one for the other in either direction.
+    if is_zero_sugar(query) != is_zero_sugar(title):
 
         return False
 
