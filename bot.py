@@ -31,7 +31,7 @@ from connectors.google_search import (
 )
 from connectors.google_shopping import search_google_shopping
 from location_profile import compose_search_location
-from offer_display import select_display_offers
+from offer_display import has_preferred_offers, select_display_offers
 from product_matching import (
     extract_pack_count,
     is_relevant_result,
@@ -1899,6 +1899,26 @@ async def message_handler(
 
     max_discount = None
 
+    preferred_prices_found = has_preferred_offers(
+        filtered_results,
+        PREFERRED_RETAILERS,
+        format_retailer_name,
+    )
+
+    if preferred_prices_found:
+        lines.append("💰 <b>Цены, которые удалось получить:</b>")
+    else:
+        lines.append(
+            "💰 <b>Дополнительные магазины "
+            "с опубликованной ценой:</b>"
+        )
+        lines.append(
+            "<i>У крупных сетей цена пока не получена — "
+            "она появится после выбора торговой точки.</i>"
+        )
+
+    lines.append("")
+
 
     for index, item in enumerate(
 
@@ -1973,7 +1993,11 @@ async def message_handler(
         # RANK
         # ----------------------------------------------------
 
-        if index == 1:
+        if not preferred_prices_found:
+
+            prefix = f"{index}."
+
+        elif index == 1:
 
             prefix = "🥇"
 
@@ -2132,7 +2156,7 @@ async def message_handler(
 
             lines.append("")
             lines.append(
-                "🏪 <b>Проверить цену в крупных сетях:</b>"
+                "🏪 <b>Крупные сети — цена после выбора магазина:</b>"
             )
             retailer_links = []
 
@@ -2150,7 +2174,8 @@ async def message_handler(
                 )
 
             lines.append(
-                "Цены зависят от выбранной торговой точки."
+                "Открой сеть и выбери ближайшую торговую точку — "
+                "после этого сайт покажет актуальную цену."
             )
 
     lowest_price = lowest_offer["numeric_price"]
@@ -2212,10 +2237,15 @@ async def message_handler(
         )
 
 
+    lowest_price_label = (
+        "Самая низкая найденная цена"
+        if preferred_prices_found
+        else "Самая низкая цена среди дополнительных магазинов"
+    )
+
     lines.append(
 
-        "🔥 <b>Самая низкая "
-        "найденная цена: "
+        f"🔥 <b>{lowest_price_label}: "
 
         f"{lowest_price_text}"
 
